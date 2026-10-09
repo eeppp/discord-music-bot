@@ -9,7 +9,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# استخدام البحث عبر SoundCloud يضمن الثبات وعدم الحظر على خوادم Railway
+# خيارات استخراج yt-dlp المستقرة
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -18,13 +18,14 @@ YTDL_OPTIONS = {
     "logtostderr": False,
     "quiet": True,
     "no_warnings": True,
-    "default_search": "scsearch",
+    "default_search": "ytsearch",
     "source_address": "0.0.0.0",
 }
 
+# خيارات FFmpeg المعتمدة لفك ضغط الصوت وإرساله لديسكورد
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
+    "options": "-vn -f s16le -ar 48000 -ac 2",
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
@@ -36,18 +37,30 @@ class YTDLSource(discord.PCMVolumeTransformer):
         super().__init__(source, volume)
         self.data = data
         self.title = data.get("title", "مقطع صوتي")
+        self.url = data.get("url")
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
+        # جلب تفاصيل المقطع
         data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(url, download=not stream)
+            None,
+            lambda: ytdl.extract_info(
+                f"ytsearch:{url}"
+                if not url.startswith("http")
+                else url,
+                download=False,
+            ),
         )
 
-        if "entries" in data:
+        if "entries" in data and len(data["entries"]) > 0:
             data = data["entries"][0]
 
-        filename = data["url"] if stream else ytdl.prepare_filename(data)
+        # الحصول على الرابط المباشر
+        filename = data.get("url")
+        if not filename:
+            raise Exception("لم يتم العثور على رابط مباشر للبث الصوتي.")
+
         return cls(
             discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data
         )
@@ -64,20 +77,31 @@ async def play(ctx, *, search: str):
         await ctx.send("❌ يجب أن تكون في روم صوتي أولاً!")
         return
 
+    # الاتصال بالروم الصوتي
     if not ctx.voice_client:
         await ctx.author.voice.channel.connect()
+    elif ctx.voice_client.channel != ctx.author.voice.channel:
+        await ctx.voice_client.move_to(ctx.author.voice.channel)
 
     async with ctx.typing():
         try:
             player = await YTDLSource.from_url(
                 search, loop=bot.loop, stream=True
             )
-            ctx.voice_client.play(
-                player,
-                after=lambda e: print(f"Player error: {e}") if e else None,
-            )
-            await ctx.send(f"🎵 **شغال الحين:** {player.title}")
+
+            def after_playing(error):
+                if error:
+                    print(f"⚠️ خطأ أثناء تشغيل الصوت: {error}")
+
+            # إذا كان هناك مقطع يعمل، قم بإيقافه أولاً
+            if ctx.voice_client.is_playing():
+                ctx.voice_client.stop()
+
+            ctx.voice_client.play(player, after=after_playing)
+            await ctx.send(f"🎵 **جاري تشغيل:** {player.title}")
+
         except Exception as e:
+            print(f"Error in play command: {e}")
             await ctx.send(
                 f"⚠️ **حدث خطأ أثناء البحث أو التشغيل:**\n`{str(e)}`"
             )
@@ -88,6 +112,8 @@ async def stop(ctx):
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
         await ctx.send("⏹️ تم الإيقاف ومغادرة الروم الصوتي.")
+    else:
+        await ctx.send("❌ البوت ليس متصلاً بأي روم صوتي.")
 
 
 TOKEN = os.getenv("DISCORD_TOKEN")
