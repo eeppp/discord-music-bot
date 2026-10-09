@@ -9,7 +9,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# إعدادات yt-dlp محدثة لتفادي انقطاع البث واستخراج العنوان الصحيح
+# استخدام البحث عبر SoundCloud يضمن الثبات وعدم الحظر على خوادم Railway
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -18,17 +18,13 @@ YTDL_OPTIONS = {
     "logtostderr": False,
     "quiet": True,
     "no_warnings": True,
-    "default_search": "ytsearch",
+    "default_search": "scsearch",
     "source_address": "0.0.0.0",
-    "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    },
 }
 
-# خيارات FFmpeg لضمان استقرار البث وعدم إغلاقه فوراً
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn -loglevel error",
+    "options": "-vn",
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
@@ -40,15 +36,12 @@ class YTDLSource(discord.PCMVolumeTransformer):
         super().__init__(source, volume)
         self.data = data
         self.title = data.get("title", "مقطع صوتي")
-        self.url = data.get("url")
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
-        # استخدام process=True لضمان جلب العنوان المباشر للمقطع
         data = await loop.run_in_executor(
-            None,
-            lambda: ytdl.extract_info(url, download=not stream, process=True),
+            None, lambda: ytdl.extract_info(url, download=not stream)
         )
 
         if "entries" in data:
@@ -79,14 +72,11 @@ async def play(ctx, *, search: str):
             player = await YTDLSource.from_url(
                 search, loop=bot.loop, stream=True
             )
-
-            def after_playing(error):
-                if error:
-                    print(f"خطأ في التشغيل: {error}")
-
-            ctx.voice_client.play(player, after=after_playing)
+            ctx.voice_client.play(
+                player,
+                after=lambda e: print(f"Player error: {e}") if e else None,
+            )
             await ctx.send(f"🎵 **شغال الحين:** {player.title}")
-
         except Exception as e:
             await ctx.send(
                 f"⚠️ **حدث خطأ أثناء البحث أو التشغيل:**\n`{str(e)}`"
@@ -98,10 +88,8 @@ async def stop(ctx):
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
         await ctx.send("⏹️ تم الإيقاف ومغادرة الروم الصوتي.")
-    else:
-        await ctx.send("❌ البوت ليس متصلاً بأي روم صوتي.")
 
 
-TOKEN = os.getenv("MTU1Nzg0MDQzNTEzOTk3MzI0MQ.GOccIt.-UTJi04rG6UYZ1M8S2-56-PFmNxVlQiwcMzKkk")
+TOKEN = os.getenv("DISCORD_TOKEN")
 if TOKEN:
     bot.run(TOKEN)
