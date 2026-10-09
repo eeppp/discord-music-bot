@@ -9,7 +9,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات البحث عبر SoundCloud لضمان العمل على السيرفرات بدون حظر IP
+# استخدام البحث عبر SoundCloud للتغلب على حظر خوادم Railway وضمان الاستقرار
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -22,7 +22,7 @@ YTDL_OPTIONS = {
     "source_address": "0.0.0.0",
 }
 
-# خيارات FFmpeg المحدثة لضبط معالجة دفق الصوت
+# خيارات FFmpeg المحدثة لضمان استمرار البث ومنع الانقطاع
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
@@ -37,21 +37,22 @@ class YTDLSource(discord.PCMVolumeTransformer):
         super().__init__(source, volume)
         self.data = data
         self.title = data.get("title", "مقطع صوتي")
-        self.url = data.get("url")
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # الاستخراج بدون تحميل
+        # استخراج معلومات الصوت بدون تحميل
         data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(url, download=False)
+            None, lambda: ytdl.extract_info(url, download=not stream)
         )
 
         if "entries" in data and len(data["entries"]) > 0:
             data = data["entries"][0]
 
-        filename = data["url"]
+        filename = data.get("url")
+        if not filename:
+            raise Exception("لم يتم العثور على رابط مباشر للبث الصوتي.")
 
         return cls(
             discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data
@@ -69,7 +70,7 @@ async def play(ctx, *, search: str):
         await ctx.send("❌ يجب أن تكون في روم صوتي أولاً!")
         return
 
-    # الاتصال بالروم الصوتي
+    # الاتصال بالروم الصوتي إذا لم يكن البوت متصلاً
     if not ctx.voice_client:
         await ctx.author.voice.channel.connect()
     elif ctx.voice_client.channel != ctx.author.voice.channel:
@@ -103,6 +104,8 @@ async def stop(ctx):
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
         await ctx.send("⏹️ تم الإيقاف ومغادرة الروم الصوتي.")
+    else:
+        await ctx.send("❌ البوت ليس متصلاً بأي روم صوتي.")
 
 
 TOKEN = os.getenv("DISCORD_TOKEN")
