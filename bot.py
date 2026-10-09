@@ -9,7 +9,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# استخدام البحث عبر SoundCloud للتغلب على حظر خوادم Railway وضمان الاستقرار
+# خيارات البحث المستقرة لمسارات الصوت عبر SoundCloud لتفادي حظر IP
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -22,13 +22,26 @@ YTDL_OPTIONS = {
     "source_address": "0.0.0.0",
 }
 
-# خيارات FFmpeg المحدثة لضمان استمرار البث ومنع الانقطاع
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+
+# قائمة انتظار التشغيل للكل سيرفر
+queues = {}
+
+
+def check_queue(ctx, id):
+    if id in queues and len(queues[id]) > 0:
+        player = queues[id].pop(0)
+        ctx.voice_client.play(
+            player, after=lambda e: check_queue(ctx, ctx.guild.id)
+        )
+        asyncio.run_coroutine_threadsafe(
+            ctx.send(f"🎵 **جاري تشغيل التالي:** {player.title}"), bot.loop
+        )
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -41,19 +54,14 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
-
-        # استخراج معلومات الصوت بدون تحميل
         data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(url, download=not stream)
+            None, lambda: ytdl.extract_info(url, download=False)
         )
 
         if "entries" in data and len(data["entries"]) > 0:
             data = data["entries"][0]
 
         filename = data.get("url")
-        if not filename:
-            raise Exception("لم يتم العثور على رابط مباشر للبث الصوتي.")
-
         return cls(
             discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data
         )
@@ -64,48 +72,52 @@ async def on_ready():
     print(f"تم تسجيل الدخول بنجاح باسم: {bot.user.name}")
 
 
-@bot.command(name="play", aliases=["p", "تشغيل", "شغل"])
+@bot.command(name="play", aliases=["p", "شغل", "تشغيل"])
 async def play(ctx, *, search: str):
     if not ctx.author.voice:
         await ctx.send("❌ يجب أن تكون في روم صوتي أولاً!")
         return
 
-    # الاتصال بالروم الصوتي إذا لم يكن البوت متصلاً
     if not ctx.voice_client:
         await ctx.author.voice.channel.connect()
-    elif ctx.voice_client.channel != ctx.author.voice.channel:
-        await ctx.voice_client.move_to(ctx.author.voice.channel)
 
     async with ctx.typing():
         try:
             player = await YTDLSource.from_url(
                 search, loop=bot.loop, stream=True
             )
+            guild_id = ctx.guild.id
 
-            if ctx.voice_client.is_playing():
-                ctx.voice_client.stop()
-
-            def after_playing(error):
-                if error:
-                    print(f"خطأ أثناء تشغيل الصوت: {error}")
-
-            ctx.voice_client.play(player, after=after_playing)
-            await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
+            if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+                if guild_id not in queues:
+                    queues[guild_id] = []
+                queues[guild_id].append(player)
+                await ctx.send(f"📋 **تمت الإضافة للقائمة:** {player.title}")
+            else:
+                ctx.voice_client.play(
+                    player, after=lambda e: check_queue(ctx, guild_id)
+                )
+                await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
 
         except Exception as e:
-            print(f"Error: {e}")
-            await ctx.send(
-                f"⚠️ **حدث خطأ أثناء البحث أو التشغيل:**\n`{str(e)}`"
-            )
+            await ctx.send(f"⚠️ **حدث خطأ:** `{str(e)}`")
 
 
-@bot.command(name="stop", aliases=["ايقاف", "إيقاف", "سكت"])
+@bot.command(name="skip", aliases=["تخطي", "سكب"])
+async def skip(ctx):
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+        await ctx.send("⏭️ تم تخطي المقطع.")
+
+
+@bot.command(name="stop", aliases=["ايقاف", "إيقاف"])
 async def stop(ctx):
+    guild_id = ctx.guild.id
+    if guild_id in queues:
+        queues[guild_id].clear()
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
-        await ctx.send("⏹️ تم الإيقاف ومغادرة الروم الصوتي.")
-    else:
-        await ctx.send("❌ البوت ليس متصلاً بأي روم صوتي.")
+        await ctx.send("⏹️ تم الإيقاف وتفريغ القائمة ومغادرة الروم.")
 
 
 TOKEN = os.getenv("DISCORD_TOKEN")
