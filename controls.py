@@ -171,7 +171,6 @@ async def play_query(ctx: commands.Context, query: str | None) -> None:
         await player.enqueue(song, voice_state.channel)
         notice = await ctx.send(
             f"➕ أُضيفت **{discord.utils.escape_markdown(song.title)}** إلى المشغّل.",
-            
         )
         schedule_cleanup(notice)
         return
@@ -193,7 +192,6 @@ async def play_query(ctx: commands.Context, query: str | None) -> None:
     result_message = await ctx.send(
         embed=embed,
         view=SearchResultsView(songs, requester_id),
-        
     )
     schedule_cleanup(result_message, 120)
 
