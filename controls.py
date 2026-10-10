@@ -235,6 +235,6 @@ async def restore_panels(bot: commands.Bot) -> None:
         except discord.NotFound:
             await player_manager.database.delete_panel(guild_id)
             logger.info("Removed missing player panel %s.", message_id)
-        except (discord.Forbidden, discord.HTTPException, AttributeError):
+        except Exception:
             logger.warning("Could not restore player panel %s.", message_id, exc_info=True)
 
