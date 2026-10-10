@@ -5,6 +5,8 @@ from typing import Any
 
 import aiosqlite
 
+from config import Config
+
 
 class Database:
     def __init__(self, path: str) -> None:
@@ -109,7 +111,7 @@ class Database:
 
         if row is None:
             return {
-                "volume": 80,
+                "volume": Config.DEFAULT_VOLUME,
                 "bass": 0,
                 "autoplay": 1,
                 "theme": "Neon",
