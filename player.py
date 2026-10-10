@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,6 +50,11 @@ class MusicPlayer:
         self.control_view: discord.ui.View | None = None
         self.text_channel: discord.abc.Messageable | None = None
         self._advance_lock = asyncio.Lock()
+        self._effect_update_lock = asyncio.Lock()
+        self._playback_generation = 0
+        self._track_offset = 0.0
+        self._track_started_at: float | None = None
+        self._track_rate = 1.0
         self._skip_repeat = False
         self._settings_loaded = False
 
@@ -120,24 +126,66 @@ class MusicPlayer:
             except Exception:
                 raise first_error
 
-    async def _start_song(self, song: Song) -> None:
+    def _create_source(self, stream_url: str, start_at: float = 0) -> discord.AudioSource:
+        source = discord.FFmpegPCMAudio(
+            stream_url,
+            **ffmpeg_options(self.bass, self.effect, start_at=start_at),
+        )
+        return discord.PCMVolumeTransformer(source, volume=self.volume / 100)
+
+    def _play_source(
+        self,
+        source: discord.AudioSource,
+        start_at: float = 0,
+        start_paused: bool = False,
+    ) -> None:
+        if not self.voice or not self.voice.is_connected():
+            raise RuntimeError("Voice client disconnected before playback started.")
+
+        self._playback_generation += 1
+        generation = self._playback_generation
+        loop = asyncio.get_running_loop()
+
+        def after(error: Exception | None) -> None:
+            if error:
+                logger.error("Audio playback failed in guild %s: %s", self.guild_id, error)
+            loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self._after_track(generation))
+            )
+
+        self.voice.play(source, after=after)
+        self._track_offset = max(0.0, start_at)
+        self._track_rate = 1.12 if self.effect == "nightcore" else 1.0
+        if start_paused:
+            self.voice.pause()
+            self._track_started_at = None
+        else:
+            self._track_started_at = time.monotonic()
+
+    def _current_position(self) -> float:
+        position = self._track_offset
+        if self._track_started_at is not None:
+            position += max(0.0, time.monotonic() - self._track_started_at) * self._track_rate
+        if self.current and self.current.duration > 0:
+            position = min(position, float(self.current.duration))
+        return position
+
+    async def _start_song(
+        self,
+        song: Song,
+        start_at: float = 0,
+        start_paused: bool = False,
+    ) -> None:
         if not self.voice or not self.voice.is_connected():
             logger.warning("Cannot start playback without a connected voice client.")
             return
         try:
             stream = await self._stream_url(song)
-            source = discord.FFmpegPCMAudio(stream, **ffmpeg_options(self.bass, self.effect))
-            source = discord.PCMVolumeTransformer(source, volume=self.volume / 100)
-            loop = asyncio.get_running_loop()
-
-            def after(error: Exception | None) -> None:
-                if error:
-                    logger.error("Audio playback failed in guild %s: %s", self.guild_id, error)
-                loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(self._after_track())
-                )
-
-            self.voice.play(source, after=after)
+            self._play_source(
+                self._create_source(stream, start_at=start_at),
+                start_at=start_at,
+                start_paused=start_paused,
+            )
             await self._refresh_panel()
         except Exception as exc:
             logger.exception("Could not play %s: %s", song.title, exc)
@@ -151,7 +199,10 @@ class MusicPlayer:
                     pass
             await self.advance(force=True)
 
-    async def _after_track(self) -> None:
+    async def _after_track(self, generation: int) -> None:
+        if generation != self._playback_generation:
+            return
+        self._track_started_at = None
         if self.current:
             try:
                 await self.database.add_history(
@@ -191,6 +242,8 @@ class MusicPlayer:
 
             if next_song is None:
                 self.current = None
+                self._track_offset = 0.0
+                self._track_started_at = None
                 await self._refresh_panel()
                 return
 
@@ -207,6 +260,8 @@ class MusicPlayer:
 
     async def pause(self) -> bool:
         if self.voice and self.voice.is_playing():
+            self._track_offset = self._current_position()
+            self._track_started_at = None
             self.voice.pause()
             await self._refresh_panel()
             return True
@@ -215,6 +270,7 @@ class MusicPlayer:
     async def resume(self) -> bool:
         if self.voice and self.voice.is_paused():
             self.voice.resume()
+            self._track_started_at = time.monotonic()
             await self._refresh_panel()
             return True
         return False
@@ -222,6 +278,9 @@ class MusicPlayer:
     async def stop(self, disconnect: bool = False) -> None:
         self.queue.clear()
         self.current = None
+        self._track_offset = 0.0
+        self._track_started_at = None
+        self._playback_generation += 1
         self._skip_repeat = True
         if self.voice and (self.voice.is_playing() or self.voice.is_paused()):
             self.voice.stop()
@@ -243,6 +302,70 @@ class MusicPlayer:
     def set_effect(self, value: str) -> str:
         self.effect = normalize_effect(value)
         return self.effect
+
+    async def apply_effects_to_current(self) -> bool:
+        """Restart the current stream with updated filters at its current position."""
+        async with self._effect_update_lock:
+            voice = self.voice
+            song = self.current
+            if (
+                not voice
+                or not voice.is_connected()
+                or not song
+                or not (voice.is_playing() or voice.is_paused())
+            ):
+                return False
+
+            try:
+                stream = await self._stream_url(song)
+            except Exception:
+                logger.exception("Could not resolve the current song to update its effects.")
+                return False
+
+            if (
+                self.current is not song
+                or self.voice is not voice
+                or not voice.is_connected()
+                or not (voice.is_playing() or voice.is_paused())
+            ):
+                return False
+
+            position = self._current_position()
+            was_paused = voice.is_paused()
+            try:
+                source = self._create_source(stream, start_at=position)
+            except Exception:
+                logger.exception("Could not prepare the current song with updated effects.")
+                return False
+
+            if not (voice.is_playing() or voice.is_paused()):
+                source.cleanup()
+                return False
+
+            # No await between stopping the old source and starting the replacement.
+            voice.stop()
+            try:
+                self._play_source(
+                    source,
+                    start_at=position,
+                    start_paused=was_paused,
+                )
+            except Exception:
+                source.cleanup()
+                logger.exception("Could not restart the current song with updated effects.")
+                await self._start_song(
+                    song,
+                    start_at=position,
+                    start_paused=was_paused,
+                )
+                return bool(
+                    self.current is song
+                    and voice.is_connected()
+                    and (voice.is_playing() or voice.is_paused())
+                )
+
+            await self._refresh_panel()
+            return True
 
     async def _refresh_panel(self) -> None:
         try:

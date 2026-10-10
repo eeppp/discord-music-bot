@@ -32,7 +32,11 @@ def normalize_effect(value: str) -> str:
     return effect if effect in VALID_EFFECTS else "normal"
 
 
-def ffmpeg_options(bass: int | float = 0, effect: str = "normal") -> dict[str, str]:
+def ffmpeg_options(
+    bass: int | float = 0,
+    effect: str = "normal",
+    start_at: float = 0,
+) -> dict[str, str]:
     """Build reconnect and audio filter arguments for FFmpeg."""
     bass = clamp_bass(bass)
     effect = normalize_effect(effect)
@@ -52,7 +56,10 @@ def ffmpeg_options(bass: int | float = 0, effect: str = "normal") -> dict[str, s
     options = "-vn -loglevel error"
     if filters:
         options += " -af " + ",".join(filters)
+    before_options = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+    if start_at > 0:
+        before_options += f" -ss {max(0.0, start_at):.3f}"
     return {
-        "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+        "before_options": before_options,
         "options": options,
     }
