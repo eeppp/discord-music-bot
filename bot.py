@@ -1,5 +1,6 @@
 import asyncio
 import os
+import traceback
 import aiohttp
 import discord
 from discord.ext import commands
@@ -54,7 +55,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # 1. إذا كان رابط بث مباشر
         if search_query.startswith("http") and (
             ".mp3" in search_query or "stream" in search_query
         ):
@@ -67,7 +67,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 data={"title": "بث صوتي مباشر"},
             )
 
-        # 2. فحص الروابط عبر Piped API لتجاوز حظر يوتيوب في Railway
         video_id = None
         if "youtu.be/" in search_query:
             video_id = search_query.split("youtu.be/")[1].split("?")[0]
@@ -89,34 +88,36 @@ class YTDLSource(discord.PCMVolumeTransformer):
                             audio_streams = res_data.get("audioStreams", [])
                             if audio_streams:
                                 audio_url = audio_streams[0].get("url")
-            except Exception:
-                pass
+            except Exception as ex:
+                print("Piped API Error:", ex)
 
-        # 3. استخدام yt-dlp بالطريقة الآمنة كخيار ثانٍ
         if not audio_url:
             if search_query.startswith("http"):
                 target = search_query
             else:
                 target = f"scsearch1:{search_query}"
 
-            data = await loop.run_in_executor(
-                None, lambda: ytdl.extract_info(target, download=False)
-            )
+            try:
+                data = await loop.run_in_executor(
+                    None, lambda: ytdl.extract_info(target, download=False)
+                )
+            except Exception as ytdl_ex:
+                raise Exception(f"خطأ في استخراج yt-dlp: {str(ytdl_ex)}")
 
             if not data:
-                raise Exception("تعذر جلب المقطع بسبب حظر السيرفر.")
+                raise Exception("لم يتم استرجاع أي بيانات من المصدر (Data is None).")
 
             if "entries" in data:
                 entries = [e for e in data["entries"] if e and e.get("url")]
                 if not entries:
-                    raise Exception("لم يتم العثور على نتائج.")
+                    raise Exception("لم يتم العثور على نتائج مطابقة للبحث.")
                 data = entries[0]
 
             audio_url = data.get("url")
             title = data.get("title", "مقطع صوتي")
 
         if not audio_url:
-            raise Exception("تعذر جلب رابط الصوت.")
+            raise Exception("فشل في العثور على رابط البث الصوتي الفعلي.")
 
         return cls(
             discord.FFmpegPCMAudio(
@@ -166,7 +167,9 @@ async def play(ctx, *, search: str):
                 await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
 
         except Exception as e:
-            await ctx.send(f"⚠️ **حدث خطأ:** `{str(e)}`")
+            traceback.print_exc()
+            error_msg = str(e) if str(e) else f"نوع الخطأ: {type(e).__name__}"
+            await ctx.send(f"⚠️ **تفاصيل الخطأ:** `{error_msg}`")
 
 
 @bot.command(name="skip", aliases=["تخطي", "سكب"])
