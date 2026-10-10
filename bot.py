@@ -10,6 +10,15 @@ import yt_dlp
 
 FFMPEG_EXECUTABLE = imageio_ffmpeg.get_ffmpeg_exe()
 
+if not discord.opus.is_loaded():
+    try:
+        discord.opus.load_opus("libopus.so.0")
+    except OSError:
+        try:
+            discord.opus.load_opus("libopus-0.dll")
+        except OSError:
+            print("⚠️ لم يتم العثور على مكتبة Opus")
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
