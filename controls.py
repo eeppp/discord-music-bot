@@ -135,29 +135,30 @@ def schedule_cleanup(message: discord.Message, delay: int | None = None) -> None
 async def play_query(ctx: commands.Context, query: str | None) -> None:
     voice_state = getattr(ctx.author, "voice", None)
     if not voice_state or not voice_state.channel:
-        await ctx.reply("🔊 ادخل قناة صوتية أولًا، ثم أرسل أمر التشغيل.", mention_author=False)
+        await ctx.send("🔊 ادخل قناة صوتية أولًا، ثم أرسل أمر التشغيل.")
         return
 
     player = await load_player(ctx.guild.id, ctx.channel)
     if len(player.queue) >= Config.MAX_QUEUE:
-        await ctx.reply("قائمة الانتظار ممتلئة. ابدأ تشغيلها أو أفرغ جزءًا منها أولًا.", mention_author=False)
+        await ctx.send("قائمة الانتظار ممتلئة. ابدأ تشغيلها أو أفرغ جزءًا منها أولًا.")
         return
     if not query:
         if player.current:
             await ensure_panel(player, ctx.channel)
         else:
-            await ctx.reply("اكتب اسم أغنية أو رابط YouTube/SoundCloud بعد أمر شغل.", mention_author=False)
+            await ctx.send("اكتب اسم أغنية أو رابط YouTube/SoundCloud بعد أمر شغل.")
         return
 
+    await ctx.defer()
     try:
         songs = await music_search.search(query, limit=Config.SEARCH_RESULTS)
     except Exception as exc:
         logger.exception("Search failed.")
-        await ctx.reply(f"تعذّر البحث عن الأغنية: {exc}", mention_author=False)
+        await ctx.send(f"تعذّر البحث عن الأغنية: {exc}")
         return
 
     if not songs:
-        await ctx.reply("ما لقيت نتائج. جرّب اسمًا آخر أو رابطًا مباشرًا.", mention_author=False)
+        await ctx.send("ما لقيت نتائج. جرّب اسمًا آخر أو رابطًا مباشرًا.")
         return
 
     requester_id = ctx.author.id
@@ -168,9 +169,9 @@ async def play_query(ctx: commands.Context, query: str | None) -> None:
         song = songs[0]
         await ensure_panel(player, ctx.channel)
         await player.enqueue(song, voice_state.channel)
-        notice = await ctx.reply(
+        notice = await ctx.send(
             f"➕ أُضيفت **{discord.utils.escape_markdown(song.title)}** إلى المشغّل.",
-            mention_author=False,
+            
         )
         schedule_cleanup(notice)
         return
@@ -189,10 +190,10 @@ async def play_query(ctx: commands.Context, query: str | None) -> None:
             value=f"{song.source or 'نتيجة'} · {format_duration(song.duration)}",
             inline=False,
         )
-    result_message = await ctx.reply(
+    result_message = await ctx.send(
         embed=embed,
         view=SearchResultsView(songs, requester_id),
-        mention_author=False,
+        
     )
     schedule_cleanup(result_message, 120)
 
