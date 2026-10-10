@@ -9,7 +9,7 @@ import discord
 import yt_dlp
 
 from config import Config
-from effects import clamp_bass, ffmpeg_options
+from effects import clamp_bass, ffmpeg_options, normalize_effect
 from modules.queue import SongQueue
 
 logger = logging.getLogger("MusicS3YD.player")
@@ -39,6 +39,7 @@ class MusicPlayer:
         self.current: Song | None = None
         self.volume = Config.DEFAULT_VOLUME
         self.bass = 0
+        self.effect = "normal"
         self.repeat = False
         self.shuffle = False
         self.autoplay = Config.AUTO_PLAY
@@ -54,6 +55,7 @@ class MusicPlayer:
         settings = await self.database.get_settings(self.guild_id)
         self.volume = max(0, min(200, int(settings.get("volume", Config.DEFAULT_VOLUME))))
         self.bass = clamp_bass(settings.get("bass", 0))
+        self.effect = normalize_effect(str(settings.get("effect", "normal")))
         self.autoplay = bool(settings.get("autoplay", int(Config.AUTO_PLAY)))
         self.repeat = bool(settings.get("repeat", 0))
         self._settings_loaded = True
@@ -63,6 +65,7 @@ class MusicPlayer:
             self.guild_id,
             volume=self.volume,
             bass=self.bass,
+            effect=self.effect,
             autoplay=int(self.autoplay),
             repeat=int(self.repeat),
         )
@@ -117,7 +120,7 @@ class MusicPlayer:
             return
         try:
             stream = await self._stream_url(song)
-            source = discord.FFmpegPCMAudio(stream, **ffmpeg_options(self.bass))
+            source = discord.FFmpegPCMAudio(stream, **ffmpeg_options(self.bass, self.effect))
             source = discord.PCMVolumeTransformer(source, volume=self.volume / 100)
             loop = asyncio.get_running_loop()
 
@@ -230,6 +233,10 @@ class MusicPlayer:
     def set_bass(self, value: int) -> int:
         self.bass = clamp_bass(value)
         return self.bass
+
+    def set_effect(self, value: str) -> str:
+        self.effect = normalize_effect(value)
+        return self.effect
 
     async def _refresh_panel(self) -> None:
         try:
