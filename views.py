@@ -16,7 +16,7 @@ def _duration(seconds: int) -> str:
 
 class PlayerControls(discord.ui.View):
     def __init__(self, player: MusicPlayer) -> None:
-        super().__init__(timeout=1800)
+        super().__init__(timeout=None)
         self.player = player
         self.add_item(VolumeSelect(player))
         self.add_item(BassSelect(player))
@@ -31,7 +31,7 @@ class PlayerControls(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="إيقاف مؤقت", emoji="⏯️", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="إيقاف مؤقت", emoji="⏯️", style=discord.ButtonStyle.primary, custom_id="music:pause", row=0)
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         if self.player.voice and self.player.voice.is_paused():
@@ -43,19 +43,19 @@ class PlayerControls(discord.ui.View):
         await self.player._refresh_panel()
         await interaction.followup.send(message, ephemeral=True)
 
-    @discord.ui.button(label="تخطي", emoji="⏭️", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="تخطي", emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="music:skip", row=0)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         await self.player.skip()
         await interaction.followup.send("تم تخطي الأغنية.", ephemeral=True)
 
-    @discord.ui.button(label="إيقاف", emoji="⏹️", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="إيقاف", emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="music:stop", row=0)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         await self.player.stop()
         await interaction.followup.send("توقف التشغيل وتم مسح قائمة الانتظار.", ephemeral=True)
 
-    @discord.ui.button(label="خلط", emoji="🔀", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="خلط", emoji="🔀", style=discord.ButtonStyle.secondary, custom_id="music:shuffle", row=0)
     async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         self.player.queue.shuffle()
@@ -63,7 +63,7 @@ class PlayerControls(discord.ui.View):
         await self.player._refresh_panel()
         await interaction.followup.send("تم خلط قائمة الانتظار.", ephemeral=True)
 
-    @discord.ui.button(label="تكرار", emoji="🔁", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="تكرار", emoji="🔁", style=discord.ButtonStyle.secondary, custom_id="music:repeat", row=0)
     async def repeat_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         self.player.repeat = not self.player.repeat
@@ -72,7 +72,7 @@ class PlayerControls(discord.ui.View):
         status = "مفعّل" if self.player.repeat else "متوقف"
         await interaction.followup.send(f"التكرار: {status}.", ephemeral=True)
 
-    @discord.ui.button(label="التشغيل التلقائي", emoji="📻", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="التشغيل التلقائي", emoji="📻", style=discord.ButtonStyle.secondary, custom_id="music:autoplay", row=1)
     async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         self.player.autoplay = not self.player.autoplay
@@ -81,7 +81,7 @@ class PlayerControls(discord.ui.View):
         status = "مفعّل" if self.player.autoplay else "متوقف"
         await interaction.followup.send(f"التشغيل التلقائي: {status}.", ephemeral=True)
 
-    @discord.ui.button(label="قائمة الانتظار", emoji="📜", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="قائمة الانتظار", emoji="📜", style=discord.ButtonStyle.secondary, custom_id="music:queue", row=1)
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         from controls import queue_embed
 
@@ -100,6 +100,7 @@ class VolumeSelect(discord.ui.Select):
         ]
         super().__init__(
             placeholder="🔊 مستوى الصوت (0–200%)",
+            custom_id="music:volume",
             min_values=1,
             max_values=1,
             options=options,
@@ -126,6 +127,7 @@ class BassSelect(discord.ui.Select):
         ]
         super().__init__(
             placeholder="🎚️ تعزيز الجهير",
+            custom_id="music:bass",
             min_values=1,
             max_values=1,
             options=options,
