@@ -4,6 +4,7 @@ import discord
 
 from config import Config
 from player import MusicPlayer, Song
+from permissions import DJ_DENIED_MESSAGE, has_dj_access
 
 
 def _duration(seconds: int) -> str:
@@ -34,6 +35,9 @@ class PlayerControls(discord.ui.View):
 
     @discord.ui.button(label="إيقاف مؤقت", emoji="⏯️", style=discord.ButtonStyle.primary, custom_id="music:pause", row=0)
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         if self.player.voice and self.player.voice.is_paused():
             changed = await self.player.resume()
@@ -46,18 +50,27 @@ class PlayerControls(discord.ui.View):
 
     @discord.ui.button(label="تخطي", emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="music:skip", row=0)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         await self.player.skip()
         await interaction.followup.send("تم تخطي الأغنية.", ephemeral=True)
 
     @discord.ui.button(label="إيقاف", emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="music:stop", row=0)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         await self.player.stop()
         await interaction.followup.send("توقف التشغيل وتم مسح قائمة الانتظار.", ephemeral=True)
 
     @discord.ui.button(label="خلط", emoji="🔀", style=discord.ButtonStyle.secondary, custom_id="music:shuffle", row=0)
     async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         self.player.queue.shuffle()
         self.player.shuffle = True
@@ -66,6 +79,9 @@ class PlayerControls(discord.ui.View):
 
     @discord.ui.button(label="تكرار", emoji="🔁", style=discord.ButtonStyle.secondary, custom_id="music:repeat", row=0)
     async def repeat_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         self.player.repeat = not self.player.repeat
         await self.player.save_settings()
@@ -75,6 +91,9 @@ class PlayerControls(discord.ui.View):
 
     @discord.ui.button(label="التشغيل التلقائي", emoji="📻", style=discord.ButtonStyle.secondary, custom_id="music:autoplay", row=1)
     async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         self.player.autoplay = not self.player.autoplay
         await self.player.save_settings()
@@ -111,10 +130,14 @@ class VolumeSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view or not await self.view.interaction_check(interaction):
             return
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
         self.player.set_volume(int(self.values[0]))
         await self.player.save_settings()
         await self.player._refresh_panel()
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"تم ضبط الصوت على {self.player.volume}%.", ephemeral=True
         )
 
@@ -138,11 +161,15 @@ class BassSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view or not await self.view.interaction_check(interaction):
             return
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
         self.player.set_bass(int(self.values[0]))
         await self.player.save_settings()
         await self.player._refresh_panel()
-        await interaction.response.send_message(
-            f"تم ضبط Bass Boost على {self.player.bass}/10. سيطبّق على الصوت الحالي بعد تخطيه.",
+        await interaction.followup.send(
+            f"تم ضبط Bass Boost على {self.player.bass}/10. سيطبّق على الأغنية التالية.",
             ephemeral=True,
         )
 
@@ -169,10 +196,14 @@ class EffectSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view or not await self.view.interaction_check(interaction):
             return
+        if not has_dj_access(interaction.user, self.player.dj_role):
+            await interaction.response.send_message(DJ_DENIED_MESSAGE, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
         self.player.set_effect(self.values[0])
         await self.player.save_settings()
         await self.player._refresh_panel()
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "تم اختيار المؤثر. سيطبّق على الأغنية التالية.",
             ephemeral=True,
         )
