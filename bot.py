@@ -57,17 +57,22 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # إذا ادخل المستخدم رابطاً مباشراً يقرأه، وإلا يبحث في SoundCloud لتفادي الكوكيز
-        if not search_query.startswith("http"):
-            query = f"scsearch:{search_query}"
-        else:
+        # إذا أدخل المستخدم رابطاً مباشراً يقرأه، وإلا يبحث في SoundCloud
+        if search_query.startswith("http"):
             query = search_query
+        else:
+            query = f"scsearch:{search_query}"
 
         data = await loop.run_in_executor(
             None, lambda: ytdl.extract_info(query, download=False)
         )
 
-        if "entries" in data and len(data["entries"]) > 0:
+        if not data:
+            raise Exception("لم يتم العثور على نتائج للبحث.")
+
+        if "entries" in data:
+            if len(data["entries"]) == 0 or data["entries"][0] is None:
+                raise Exception("لم يتم العثور على مقطع بهذا الاسم.")
             data = data["entries"][0]
 
         filename = data.get("url")
@@ -122,7 +127,8 @@ async def play(ctx, *, search: str):
                 await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
 
         except Exception as e:
-            await ctx.send(f"⚠️ **حدث خطأ عند جلب الصوت:** `{str(e)}`")
+            error_msg = str(e) if str(e) else "تعذر جلب الصوت من المصدر."
+            await ctx.send(f"⚠️ **حدث خطأ:** `{error_msg}`")
 
 
 @bot.command(name="skip", aliases=["تخطي", "سكب"])
