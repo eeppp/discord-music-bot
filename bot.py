@@ -13,7 +13,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات yt-dlp محسنة ومستقرة مع خوادم الاستضافة
+# خيارات استخراج الصوت المخصصة لشبكات الاستضافة السحابية
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -56,43 +56,34 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # إعداد مصادر البحث المحتملة
+        # إذا أدخل المستخدم رابطاً مباشراً من أي موقع
         if search_query.startswith("http://") or search_query.startswith(
             "https://"
         ):
-            search_targets = [search_query]
+            query = search_query
         else:
-            search_targets = [
-                f"scsearch10:{search_query}",
-                f"ytsearch5:{search_query}",
-            ]
+            # البحث المباشر في Soundcloud مع تحديد البادئة بوضوح
+            query = f"scsearch:{search_query}"
 
-        data = None
-        for target in search_targets:
-            try:
-                res = await loop.run_in_executor(
-                    None, lambda: ytdl.extract_info(target, download=False)
-                )
-                if not res:
-                    continue
+        # استخراج البيانات بأسلوب لا يعطل البوت في حال تأخر الاستجابة
+        data = await loop.run_in_executor(
+            None, lambda: ytdl.extract_info(query, download=False)
+        )
 
-                if "entries" in res:
-                    valid_entries = [
-                        e for e in res["entries"] if e and e.get("url")
-                    ]
-                    if valid_entries:
-                        data = valid_entries[0]
-                        break
-                elif res.get("url"):
-                    data = res
-                    break
-            except Exception:
-                continue
+        if not data:
+            raise Exception("لم يتلق البوت أي استجابة من السيرفر الصوتية.")
 
-        if not data or not data.get("url"):
-            raise Exception("لم يتم العثور على أي نتائج، جرب كتابة اسم المقطع بشكل مختلف أو استعمل رابطاً مباشراً.")
+        # التثبت من القوائم واستخراج أول عنصر
+        if "entries" in data:
+            entries = [e for e in data["entries"] if e is not None]
+            if not entries:
+                raise Exception("لم يتم العثور على أي مقطع بهذا الاسم.")
+            data = entries[0]
 
         filename = data.get("url")
+        if not filename:
+            raise Exception("تعذر الحصول على رابط البث الصوتي المباشر.")
+
         return cls(
             discord.FFmpegPCMAudio(
                 filename, executable=FFMPEG_EXECUTABLE, **FFMPEG_OPTIONS
@@ -141,8 +132,7 @@ async def play(ctx, *, search: str):
                 await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
 
         except Exception as e:
-            error_msg = str(e) if str(e) else "تعذر جلب الصوت من المصدر."
-            await ctx.send(f"⚠️ **حدث خطأ:** `{error_msg}`")
+            await ctx.send(f"⚠️ **حدث خطأ:** `{str(e)}`")
 
 
 @bot.command(name="skip", aliases=["تخطي", "سكب"])
