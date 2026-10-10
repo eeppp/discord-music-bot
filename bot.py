@@ -5,7 +5,7 @@ from discord.ext import commands
 import imageio_ffmpeg
 import yt_dlp
 
-# تعيين مسار ffmpeg المدمج تلقائياً
+# تعيين مسار ffmpeg المدمج تلقائياً لمنع أخطاء النظام
 FFMPEG_EXECUTABLE = imageio_ffmpeg.get_ffmpeg_exe()
 
 intents = discord.Intents.default()
@@ -13,7 +13,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات البحث عبر yt-dlp
+# خيارات yt-dlp مخصصة للعمل عبر SoundCloud لتفادي حظر يوتيوب والـ Cookies
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -22,7 +22,7 @@ YTDL_OPTIONS = {
     "logtostderr": False,
     "quiet": True,
     "no_warnings": True,
-    "default_search": "ytsearch",
+    "default_search": "scsearch",
     "source_address": "0.0.0.0",
 }
 
@@ -57,8 +57,9 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
+        # إذا ادخل المستخدم رابطاً مباشراً يقرأه، وإلا يبحث في SoundCloud لتفادي الكوكيز
         if not search_query.startswith("http"):
-            query = f"ytsearch:{search_query}"
+            query = f"scsearch:{search_query}"
         else:
             query = search_query
 
