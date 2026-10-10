@@ -51,6 +51,15 @@ class Database:
 
             await db.execute(
                 """
+                CREATE TABLE IF NOT EXISTS control_panels(
+                    guild_id INTEGER PRIMARY KEY,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL
+                )
+                """
+            )
+            await db.execute(
+                """
                 CREATE TABLE IF NOT EXISTS favorites(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -124,7 +133,7 @@ class Database:
                 "bass": 0,
                 "autoplay": 1,
                 "theme": "Neon",
-                "dj_role": "DJ",
+                "dj_role": Config.DJ_ROLE,
                 "repeat": 0,
                 "effect": "normal",
             }
@@ -156,3 +165,30 @@ class Database:
                 (guild_id, title, url),
             )
             await db.commit()
+
+    async def save_panel(self, guild_id: int, channel_id: int, message_id: int) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO control_panels (guild_id, channel_id, message_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    channel_id=excluded.channel_id,
+                    message_id=excluded.message_id
+                """,
+                (guild_id, channel_id, message_id),
+            )
+            await db.commit()
+
+    async def get_panels(self) -> list[tuple[int, int, int]]:
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                "SELECT guild_id, channel_id, message_id FROM control_panels"
+            )
+            return [(int(row[0]), int(row[1]), int(row[2])) for row in await cursor.fetchall()]
+
+    async def delete_panel(self, guild_id: int) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("DELETE FROM control_panels WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+
