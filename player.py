@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
+import base64
+import binascii
 import logging
+import os
 import shlex
+import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import discord
 import yt_dlp
@@ -15,6 +22,60 @@ from effects import clamp_bass, ffmpeg_options, normalize_effect
 from modules.queue import SongQueue
 
 logger = logging.getLogger("MusicS3YD.player")
+_youtube_cookie_lock = threading.Lock()
+_youtube_cookie_path: str | None = None
+
+
+def _cleanup_youtube_cookie_file() -> None:
+    if _youtube_cookie_path:
+        try:
+            os.remove(_youtube_cookie_path)
+        except FileNotFoundError:
+            pass
+
+
+atexit.register(_cleanup_youtube_cookie_file)
+
+
+def _get_youtube_cookie_file() -> str | None:
+    """Materialize an optional base64 Netscape cookie secret to a private temp file."""
+    global _youtube_cookie_path
+    encoded = Config.YOUTUBE_COOKIES_B64
+    if not encoded:
+        return None
+
+    with _youtube_cookie_lock:
+        if _youtube_cookie_path and os.path.isfile(_youtube_cookie_path):
+            return _youtube_cookie_path
+        try:
+            cookie_data = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("YOUTUBE_COOKIES_B64 is not valid base64.") from exc
+        if not cookie_data.startswith(
+            (b"# Netscape HTTP Cookie File", b"# HTTP Cookie File")
+        ):
+            raise ValueError("YouTube cookies must use Netscape cookies.txt format.")
+
+        file_descriptor, path = tempfile.mkstemp(
+            prefix="music-s3yd-youtube-", suffix="-cookies.txt"
+        )
+        try:
+            if hasattr(os, "fchmod"):
+                os.fchmod(file_descriptor, 0o600)
+            with os.fdopen(file_descriptor, "wb") as cookie_file:
+                cookie_file.write(cookie_data)
+        except Exception:
+            try:
+                os.close(file_descriptor)
+            except OSError:
+                pass
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            raise
+        _youtube_cookie_path = path
+        return path
 
 
 @dataclass(slots=True)
@@ -117,6 +178,11 @@ class MusicPlayer:
             }
             if not use_fallback:
                 options["format"] = "bestaudio/best"
+            host = (urlparse(url).hostname or "").lower()
+            if host == "youtu.be" or host.endswith("youtube.com"):
+                cookie_file = _get_youtube_cookie_file()
+                if cookie_file:
+                    options["cookiefile"] = cookie_file
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
             if isinstance(info, dict) and info.get("entries"):
