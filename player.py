@@ -10,7 +10,7 @@ import yt_dlp
 
 from config import Config
 from effects import clamp_bass, ffmpeg_options
-from queue import SongQueue
+from modules.queue import SongQueue
 
 logger = logging.getLogger("MusicS3YD.player")
 
@@ -31,7 +31,7 @@ class Song:
 
 
 class MusicPlayer:
-    def __init__(self, guild_id: int, bot: commands.Bot | Any, database: Any) -> None:
+    def __init__(self, guild_id: int, bot: Any, database: Any) -> None:
         self.guild_id = guild_id
         self.bot = bot
         self.database = database
@@ -157,7 +157,6 @@ class MusicPlayer:
                 force = True
                 self._skip_repeat = False
 
-            next_song: Song | None = None
             if self.current and self.repeat and not force:
                 next_song = self.current
             else:
@@ -175,8 +174,6 @@ class MusicPlayer:
                          if candidate.link != self.current.link),
                         None,
                     )
-                    if next_song:
-                        self.queue.add(next_song)
                 except Exception:
                     logger.exception("Autoplay search failed.")
 
