@@ -6,7 +6,9 @@ import base64
 import binascii
 import logging
 import os
+import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -89,6 +91,7 @@ class Song:
     requester: int | None = None
     thumbnail: str | None = None
     source: str = ""
+    youtube_fallback_attempted: bool = False
 
     @property
     def link(self) -> str:
@@ -120,12 +123,17 @@ class YtDlpPipeAudio(discord.AudioSource):
             command.extend(["--cookies", cookie_file])
         command.append(url)
 
-        self._yt_process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,
-        )
+        self._yt_stderr = tempfile.TemporaryFile()
+        try:
+            self._yt_process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=self._yt_stderr,
+                bufsize=0,
+            )
+        except Exception:
+            self._yt_stderr.close()
+            raise
 
         try:
             if self._yt_process.stdout is None:
@@ -158,18 +166,50 @@ class YtDlpPipeAudio(discord.AudioSource):
         ffmpeg_process = getattr(self._ffmpeg, "_process", None)
         ffmpeg_code = ffmpeg_process.poll() if ffmpeg_process else 0
         if return_code not in (None, 0) or ffmpeg_code not in (None, 0):
-            raise RuntimeError(
+            details = self._stderr_summary()
+            detail_text = f" Details: {details}" if details else ""
+            raise YtDlpPipeError(
                 "YouTube's progressive stream ended unexpectedly "
-                f"(yt-dlp={return_code}, ffmpeg={ffmpeg_code})."
+                f"(yt-dlp={return_code}, ffmpeg={ffmpeg_code}).{detail_text}"
             )
         return b""
+
+    def _stderr_summary(self) -> str:
+        try:
+            self._yt_stderr.seek(0, os.SEEK_END)
+            size = self._yt_stderr.tell()
+            self._yt_stderr.seek(max(0, size - 8192))
+            text = self._yt_stderr.read(8192).decode("utf-8", errors="replace")
+        except (OSError, ValueError):
+            return ""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        summary = " ".join(lines[-3:])
+        summary = re.sub(r"https?://\S+", "[URL]", summary)
+        summary = re.sub(
+            r"(?i)\b(authorization|cookie|set-cookie)\s*:\s*[^\r\n]+",
+            r"\1: [REDACTED]",
+            summary,
+        )
+        summary = re.sub(
+            r"(?i)\b(cookie|authorization|token|signature|sig|key)=\S+",
+            r"\1=[REDACTED]",
+            summary,
+        )
+        return summary[-700:]
 
     def is_opus(self) -> bool:
         return False
 
     def cleanup(self) -> None:
         self._terminate_ytdlp()
-        self._ffmpeg.cleanup()
+        try:
+            self._ffmpeg.cleanup()
+        finally:
+            self._yt_stderr.close()
+
+
+class YtDlpPipeError(RuntimeError):
+    """Raised when yt-dlp fails before providing a usable audio stream."""
 
 
 class MusicPlayer:
@@ -200,6 +240,9 @@ class MusicPlayer:
         self._settings_loaded = False
         self._autoplay_seed: str | None = None
         self._consecutive_failures = 0
+        self._youtube_download_dir: str | None = None
+        self._youtube_download_link: str | None = None
+        self._youtube_download_path: str | None = None
 
     async def load_settings(self) -> None:
         settings = await self.database.get_settings(self.guild_id)
@@ -288,10 +331,87 @@ class MusicPlayer:
         host = (urlparse(url).hostname or "").lower()
         return host == "youtu.be" or host.endswith("youtube.com")
 
+    def _cleanup_youtube_download(self) -> None:
+        directory = self._youtube_download_dir
+        self._youtube_download_dir = None
+        self._youtube_download_link = None
+        self._youtube_download_path = None
+        if directory:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def _download_youtube_audio(self, url: str) -> tuple[str, str]:
+        """Download audio only when progressive playback fails for this song."""
+        directory = tempfile.mkdtemp(prefix="music-s3yd-track-")
+        options: dict[str, Any] = {
+            "format": "bestaudio/best",
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "outtmpl": os.path.join(directory, "%(id)s.%(ext)s"),
+        }
+        cookie_file = _get_youtube_cookie_file()
+        if cookie_file:
+            options["cookiefile"] = cookie_file
+
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if isinstance(info, dict) and info.get("entries"):
+                    info = next((item for item in info["entries"] if item), None)
+                if not isinstance(info, dict):
+                    raise ValueError("yt-dlp did not return downloaded audio metadata.")
+
+                requested = info.get("requested_downloads") or []
+                path = next(
+                    (
+                        str(item.get("filepath"))
+                        for item in requested
+                        if isinstance(item, dict)
+                        and item.get("filepath")
+                        and os.path.isfile(str(item["filepath"]))
+                    ),
+                    None,
+                )
+                if not path:
+                    candidate = ydl.prepare_filename(info)
+                    if os.path.isfile(candidate):
+                        path = candidate
+                if not path:
+                    path = next(
+                        (
+                            os.path.join(directory, name)
+                            for name in os.listdir(directory)
+                            if not name.endswith((".part", ".ytdl"))
+                            and os.path.isfile(os.path.join(directory, name))
+                        ),
+                        None,
+                    )
+                if not path:
+                    raise FileNotFoundError("yt-dlp finished without an audio file.")
+                return directory, path
+        except Exception:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+
     async def _playback_input(
         self, song: Song, start_at: float = 0
     ) -> discord.AudioSource:
         if self._is_youtube_url(song.link):
+            if song.youtube_fallback_attempted:
+                if (
+                    self._youtube_download_link != song.link
+                    or not self._youtube_download_path
+                    or not os.path.isfile(self._youtube_download_path)
+                ):
+                    self._cleanup_youtube_download()
+                    directory, path = await asyncio.to_thread(
+                        self._download_youtube_audio, song.link
+                    )
+                    self._youtube_download_dir = directory
+                    self._youtube_download_link = song.link
+                    self._youtube_download_path = path
+                return self._create_source(self._youtube_download_path, start_at=start_at)
+
             options = ffmpeg_options(self.bass, self.effect, start_at=0)
             ffmpeg_arguments = options["options"]
             if start_at > 0:
@@ -315,6 +435,10 @@ class MusicPlayer:
         start_at: float = 0,
     ) -> discord.AudioSource:
         options = ffmpeg_options(self.bass, self.effect, start_at=start_at)
+        if os.path.isfile(stream_url):
+            options["before_options"] = (
+                f"-ss {max(0.0, start_at):.3f}" if start_at > 0 else ""
+            )
         if headers:
             header_block = "".join(
                 f"{name}: {value}\r\n"
@@ -390,6 +514,7 @@ class MusicPlayer:
     ) -> None:
         if generation != self._playback_generation:
             return
+        played_for = self._current_position()
         self._track_started_at = None
         if error is not None:
             logger.error(
@@ -399,6 +524,19 @@ class MusicPlayer:
                 exc_info=(type(error), error, error.__traceback__),
             )
             if self.current:
+                if (
+                    isinstance(error, YtDlpPipeError)
+                    and self._is_youtube_url(self.current.link)
+                    and not self.current.youtube_fallback_attempted
+                    and played_for < 5
+                ):
+                    self.current.youtube_fallback_attempted = True
+                    logger.warning(
+                        "Progressive YouTube playback failed for %s; retrying with a buffered download.",
+                        self.current.title,
+                    )
+                    await self._start_song(self.current)
+                    return
                 await self._handle_playback_failure(self.current)
             return
 
@@ -428,6 +566,7 @@ class MusicPlayer:
                 pass
 
         if stopped:
+            self._cleanup_youtube_download()
             self.current = None
             self._track_offset = 0.0
             self._track_started_at = None
@@ -469,12 +608,15 @@ class MusicPlayer:
                     logger.exception("Autoplay search failed.")
 
             if next_song is None:
+                self._cleanup_youtube_download()
                 self.current = None
                 self._track_offset = 0.0
                 self._track_started_at = None
                 await self._refresh_panel()
                 return
 
+            if next_song is not self.current:
+                self._cleanup_youtube_download()
             self.current = next_song
             if next_song.requester is not None:
                 self._autoplay_seed = next_song.title
@@ -507,6 +649,7 @@ class MusicPlayer:
 
     async def stop(self, disconnect: bool = False) -> None:
         self.queue.clear()
+        self._cleanup_youtube_download()
         self.current = None
         self._track_offset = 0.0
         self._track_started_at = None
