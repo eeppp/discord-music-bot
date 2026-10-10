@@ -408,7 +408,11 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
     if isinstance(error, commands.CommandNotFound):
         return
     if isinstance(error, commands.MissingPermissions):
-        await _send_status(ctx, "تحتاج صلاحية إدارة الرسائل لاستخدام هذا الأمر.")
+        if "manage_guild" in error.missing_permissions:
+            message = "تحتاج صلاحية إدارة الخادم لتعيين دور DJ."
+        else:
+            message = "تحتاج صلاحية إدارة الرسائل لاستخدام هذا الأمر."
+        await _send_status(ctx, message)
         return
     if isinstance(error, commands.BotMissingPermissions):
         await _send_status(ctx, "يحتاج البوت صلاحية إدارة الرسائل في هذه القناة.")
