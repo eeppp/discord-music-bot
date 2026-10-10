@@ -5,7 +5,7 @@ from discord.ext import commands
 import imageio_ffmpeg
 import yt_dlp
 
-# تعيين مسار ffmpeg المدمج تلقائياً لمنع خطأ "ffmpeg was not found"
+# تعيين مسار ffmpeg المدمج تلقائياً
 FFMPEG_EXECUTABLE = imageio_ffmpeg.get_ffmpeg_exe()
 
 intents = discord.Intents.default()
@@ -13,15 +13,16 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# خيارات البحث المستقرة
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
     "nocheckcertificate": True,
-    "ignoreerrors": False,
+    "ignoreerrors": True,
     "logtostderr": False,
     "quiet": True,
     "no_warnings": True,
-    "default_search": "scsearch",
+    "default_search": "auto",
     "source_address": "0.0.0.0",
 }
 
@@ -53,19 +54,33 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.title = data.get("title", "مقطع صوتي")
 
     @classmethod
-    async def from_url(cls, url, *, loop=None, stream=True):
+    async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(url, download=False)
-        )
 
-        if "entries" in data and len(data["entries"]) > 0:
-            data = data["entries"][0]
+        # محاولة البحث في SoundCloud أولاً، ثم YouTube
+        search_targets = [f"scsearch:{search_query}", f"ytsearch:{search_query}"]
+        data = None
+
+        for target in search_targets:
+            try:
+                data = await loop.run_in_executor(
+                    None, lambda: ytdl.extract_info(target, download=False)
+                )
+                if (
+                    data
+                    and "entries" in data
+                    and len(data["entries"]) > 0
+                    and data["entries"][0]
+                ):
+                    data = data["entries"][0]
+                    break
+            except Exception:
+                continue
+
+        if not data or not data.get("url"):
+            raise Exception("لم يتم العثور على أي نتائج صوتية لمثلك.")
 
         filename = data.get("url")
-        if not filename:
-            raise Exception("لم يتم العثور على رابط صوتي صالح.")
-
         return cls(
             discord.FFmpegPCMAudio(
                 filename, executable=FFMPEG_EXECUTABLE, **FFMPEG_OPTIONS
@@ -81,7 +96,7 @@ async def on_ready():
 
 @bot.command(name="check", aliases=["فحص"])
 async def check(ctx):
-    await ctx.send("✅ النسخة المحدثة من البوت شغالة على Railway بنجاح!")
+    await ctx.send("✅ النسخة المحدثة من البوت شغالة بنجاح!")
 
 
 @bot.command(name="play", aliases=["p", "شغل", "تشغيل"])
@@ -114,7 +129,7 @@ async def play(ctx, *, search: str):
                 await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
 
         except Exception as e:
-            await ctx.send(f"⚠️ **حدث خطأ:** `{str(e)}`")
+            await ctx.send(f"⚠️ **لم يتم التشغيل:** `{str(e)}`")
 
 
 @bot.command(name="skip", aliases=["تخطي", "سكب"])
