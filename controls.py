@@ -139,6 +139,9 @@ async def play_query(ctx: commands.Context, query: str | None) -> None:
         return
 
     player = await load_player(ctx.guild.id, ctx.channel)
+    if player.voice and player.voice.is_connected() and player.voice.channel != voice_state.channel:
+        await ctx.send("انضم إلى قناة البوت نفسها لإضافة أغنية.")
+        return
     if len(player.queue) >= Config.MAX_QUEUE:
         await ctx.send("قائمة الانتظار ممتلئة. ابدأ تشغيلها أو أفرغ جزءًا منها أولًا.")
         return
@@ -209,6 +212,12 @@ async def add_selected_song(
         return
 
     player = await load_player(guild.id, interaction.channel)
+    if player.voice and player.voice.is_connected() and player.voice.channel != voice_state.channel:
+        await interaction.followup.send(
+            "انضم إلى قناة البوت نفسها لإضافة أغنية.",
+            ephemeral=True,
+        )
+        return
     if len(player.queue) >= Config.MAX_QUEUE:
         await interaction.followup.send("قائمة الانتظار ممتلئة حاليًا.", ephemeral=True)
         return
