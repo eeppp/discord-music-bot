@@ -43,6 +43,7 @@ queues = {}
 guild_settings = {}
 now_playing = {}
 panel_messages = {}
+last_batches = {}
 skip_once_flags = {}
 
 
@@ -54,7 +55,7 @@ def get_queue(guild_id):
 
 def get_settings(guild_id):
     if guild_id not in guild_settings:
-        guild_settings[guild_id] = {"volume": 0.5, "bass_boost": False, "repeat": False}
+        guild_settings[guild_id] = {"volume": 0.5, "bass_boost": False, "repeat": True}
     return guild_settings[guild_id]
 
 
@@ -64,6 +65,12 @@ def clamp(value, minimum=0.0, maximum=2.0):
 
 def fmt_volume(value):
     return f"{round(value * 100)}%"
+
+
+def volume_bar(value, width=10):
+    value = clamp(value)
+    filled = round((value / 2.0) * width)
+    return "▰" * filled + "▱" * (width - filled)
 
 
 def queue_text(guild_id):
@@ -118,7 +125,11 @@ class YTDLSource(discord.PCMVolumeTransformer):
             raise Exception("فشل في الحصول على رابط الصوت.")
 
         return cls(
-            discord.FFmpegPCMAudio(audio_url, executable=FFMPEG_EXECUTABLE, **ffmpeg_options_for(guild_id)),
+            discord.FFmpegPCMAudio(
+                audio_url,
+                executable=FFMPEG_EXECUTABLE,
+                **ffmpeg_options_for(guild_id),
+            ),
             data=data,
             guild_id=guild_id,
             volume=volume,
@@ -196,6 +207,36 @@ async def cleanup_bot_messages(channel, limit=30):
     return deleted
 
 
+def build_now_playing_embed(guild_id):
+    track = now_playing.get(guild_id)
+    settings = get_settings(guild_id)
+    vc = bot.get_guild(guild_id).voice_client if bot.get_guild(guild_id) else None
+    state = "متوقف" if not vc else ("متوقف مؤقتًا" if vc.is_paused() else "يعمل")
+
+    title = track.get("title", "مقطع صوتي") if track else "لا يوجد شيء الآن"
+    embed = discord.Embed(title="🎶 الآن يتم التشغيل", description=title, color=discord.Color.blurple())
+    embed.add_field(name="الحالة", value=state, inline=True)
+    embed.add_field(name="الصوت", value=f"{fmt_volume(settings['volume'])}\n{volume_bar(settings['volume'])}", inline=False)
+    embed.add_field(name="الباس", value="مفعّل" if settings["bass_boost"] else "متوقف", inline=True)
+    embed.add_field(name="إعادة", value="مفعّلة" if settings["repeat"] else "متوقفة", inline=True)
+    embed.add_field(name="الطابور", value=str(len(queues.get(guild_id, deque()))), inline=True)
+    if track and track.get("uploader"):
+        embed.add_field(name="القناة", value=track.get("uploader") or "غير معروف", inline=True)
+    if track and track.get("webpage_url"):
+        embed.url = track["webpage_url"]
+    return embed
+
+
+async def refresh_panel_message(guild_id):
+    panel = panel_messages.get(guild_id)
+    if not panel:
+        return
+    try:
+        await panel.edit(embed=build_now_playing_embed(guild_id), view=MusicControlView(guild_id))
+    except Exception:
+        pass
+
+
 async def send_now_playing(ctx, track):
     guild_id = ctx.guild.id
     old = panel_messages.get(guild_id)
@@ -205,16 +246,7 @@ async def send_now_playing(ctx, track):
         except Exception:
             pass
 
-    settings = get_settings(guild_id)
-    embed = discord.Embed(title="🎶 الآن يتم التشغيل", description=track.get("title", "مقطع صوتي"), color=discord.Color.blurple())
-    embed.add_field(name="القناة", value=track.get("uploader") or "غير معروف", inline=True)
-    embed.add_field(name="الصوت", value=fmt_volume(settings["volume"]), inline=True)
-    embed.add_field(name="الباس", value="مفعّل" if settings["bass_boost"] else "متوقف", inline=True)
-    embed.add_field(name="إعادة", value="مفعّلة" if settings["repeat"] else "متوقفة", inline=True)
-    if track.get("webpage_url"):
-        embed.url = track["webpage_url"]
-
-    message = await ctx.send(embed=embed, view=MusicControlView(guild_id))
+    message = await ctx.send(embed=build_now_playing_embed(guild_id), view=MusicControlView(guild_id))
     panel_messages[guild_id] = message
 
 
@@ -249,19 +281,22 @@ async def play_next(ctx):
 async def handle_track_end(ctx):
     guild_id = ctx.guild.id
     settings = get_settings(guild_id)
+    queue = queues.get(guild_id, deque())
 
     if skip_once_flags.pop(guild_id, False):
         await play_next(ctx)
         return
 
-    if settings.get("repeat") and now_playing.get(guild_id):
-        try:
-            await play_track(ctx, now_playing[guild_id])
-            return
-        except Exception as ex:
-            print(f"Repeat playback error: {ex}")
+    if len(queue) > 0:
+        await play_next(ctx)
+        return
 
-    await play_next(ctx)
+    if settings.get("repeat") and last_batches.get(guild_id):
+        queue.extend(last_batches[guild_id])
+        await play_next(ctx)
+        return
+
+    await refresh_panel_message(guild_id)
 
 
 async def disconnect_if_alone(guild):
@@ -274,6 +309,7 @@ async def disconnect_if_alone(guild):
         queues.get(gid, deque()).clear()
         now_playing.pop(gid, None)
         skip_once_flags.pop(gid, None)
+        last_batches.pop(gid, None)
         panel = panel_messages.pop(gid, None)
         if panel:
             try:
@@ -283,10 +319,42 @@ async def disconnect_if_alone(guild):
         await vc.disconnect()
 
 
+async def delete_message_safely(message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+class VolumeSelect(discord.ui.Select):
+    def __init__(self, guild_id):
+        self.guild_id = guild_id
+        options = [
+            discord.SelectOption(label=f"{i}%", description=f"ضبط الصوت إلى {i}%", value=str(i))
+            for i in range(0, 201, 10)
+        ]
+        super().__init__(placeholder="اختر مستوى الصوت", min_values=1, max_values=1, options=options, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        value = int(self.values[0])
+        settings = get_settings(self.guild_id)
+        settings["volume"] = value / 100
+
+        guild = bot.get_guild(self.guild_id)
+        if guild and guild.voice_client and guild.voice_client.source and hasattr(guild.voice_client.source, "volume"):
+            guild.voice_client.source.volume = settings["volume"]
+
+        await interaction.response.edit_message(
+            embed=build_now_playing_embed(self.guild_id),
+            view=MusicControlView(self.guild_id),
+        )
+
+
 class MusicControlView(discord.ui.View):
     def __init__(self, guild_id):
         super().__init__(timeout=300)
         self.guild_id = guild_id
+        self.add_item(VolumeSelect(guild_id))
 
     async def interaction_check(self, interaction):
         if not interaction.guild or interaction.guild.id != self.guild_id:
@@ -298,29 +366,27 @@ class MusicControlView(discord.ui.View):
         guild = bot.get_guild(self.guild_id)
         return guild.voice_client if guild else None
 
-    @discord.ui.button(label="إيقاف/تشغيل", style=discord.ButtonStyle.primary, emoji="⏯️")
+    @discord.ui.button(label="إيقاف/تشغيل", style=discord.ButtonStyle.primary, emoji="⏯️", row=1)
     async def pause_resume(self, interaction, button):
         vc = await self._vc()
         if not vc:
             return await interaction.response.send_message("البوت ليس في روم صوتي.", ephemeral=True)
         if vc.is_playing():
             vc.pause()
-            return await interaction.response.send_message("⏸️ تم إيقاف التشغيل مؤقتًا.", ephemeral=True)
-        if vc.is_paused():
+        elif vc.is_paused():
             vc.resume()
-            return await interaction.response.send_message("▶️ تم استئناف التشغيل.", ephemeral=True)
-        await interaction.response.send_message("لا يوجد تشغيل حاليًا.", ephemeral=True)
+        await interaction.response.edit_message(embed=build_now_playing_embed(self.guild_id), view=MusicControlView(self.guild_id))
 
-    @discord.ui.button(label="تخطي", style=discord.ButtonStyle.secondary, emoji="⏭️")
+    @discord.ui.button(label="تخطي", style=discord.ButtonStyle.secondary, emoji="⏭️", row=1)
     async def skip(self, interaction, button):
         vc = await self._vc()
         if vc and vc.is_playing():
             skip_once_flags[self.guild_id] = True
             vc.stop()
-            return await interaction.response.send_message("تم تخطي المقطع.", ephemeral=True)
+            return await interaction.response.defer()
         await interaction.response.send_message("لا يوجد مقطع شغال.", ephemeral=True)
 
-    @discord.ui.button(label="القائمة", style=discord.ButtonStyle.secondary, emoji="📜")
+    @discord.ui.button(label="القائمة", style=discord.ButtonStyle.secondary, emoji="📜", row=1)
     async def queue_button(self, interaction, button):
         current = now_playing.get(self.guild_id)
         embed = discord.Embed(title="📜 قائمة الانتظار", color=discord.Color.dark_teal())
@@ -328,43 +394,24 @@ class MusicControlView(discord.ui.View):
         embed.add_field(name="الطابور", value=queue_text(self.guild_id)[:1024], inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="خلط", style=discord.ButtonStyle.secondary, emoji="🔀")
+    @discord.ui.button(label="خلط", style=discord.ButtonStyle.secondary, emoji="🔀", row=1)
     async def shuffle_button(self, interaction, button):
         if shuffle_queue(self.guild_id):
-            return await interaction.response.send_message("🔀 تم خلط قائمة الانتظار.", ephemeral=True)
-        await interaction.response.send_message("لا توجد قائمة كافية للخلط.", ephemeral=True)
+            await interaction.response.edit_message(embed=build_now_playing_embed(self.guild_id), view=MusicControlView(self.guild_id))
+        else:
+            await interaction.response.send_message("لا توجد قائمة كافية للخلط.", ephemeral=True)
 
-    @discord.ui.button(label="تكرار", style=discord.ButtonStyle.success, emoji="🔁")
+    @discord.ui.button(label="تكرار", style=discord.ButtonStyle.success, emoji="🔁", row=1)
     async def repeat_button(self, interaction, button):
         settings = get_settings(self.guild_id)
         settings["repeat"] = not settings["repeat"]
-        await interaction.response.send_message(f"🔁 التكرار أصبح: {'مفعّل' if settings['repeat'] else 'متوقف'}", ephemeral=True)
+        await interaction.response.edit_message(embed=build_now_playing_embed(self.guild_id), view=MusicControlView(self.guild_id))
 
-    @discord.ui.button(label="صوت -", style=discord.ButtonStyle.secondary, emoji="🔉")
-    async def volume_down(self, interaction, button):
-        vc = await self._vc()
-        if not vc or not vc.source or not hasattr(vc.source, "volume"):
-            return await interaction.response.send_message("لا يوجد مصدر صوتي.", ephemeral=True)
-        settings = get_settings(self.guild_id)
-        settings["volume"] = clamp(settings["volume"] - 0.1)
-        vc.source.volume = settings["volume"]
-        await interaction.response.send_message(f"تم خفض الصوت إلى {fmt_volume(settings['volume'])}.", ephemeral=True)
-
-    @discord.ui.button(label="صوت +", style=discord.ButtonStyle.secondary, emoji="🔊")
-    async def volume_up(self, interaction, button):
-        vc = await self._vc()
-        if not vc or not vc.source or not hasattr(vc.source, "volume"):
-            return await interaction.response.send_message("لا يوجد مصدر صوتي.", ephemeral=True)
-        settings = get_settings(self.guild_id)
-        settings["volume"] = clamp(settings["volume"] + 0.1)
-        vc.source.volume = settings["volume"]
-        await interaction.response.send_message(f"تم رفع الصوت إلى {fmt_volume(settings['volume'])}.", ephemeral=True)
-
-    @discord.ui.button(label="باس", style=discord.ButtonStyle.success, emoji="🎚️")
+    @discord.ui.button(label="باس", style=discord.ButtonStyle.success, emoji="🎚️", row=2)
     async def bass_toggle(self, interaction, button):
         settings = get_settings(self.guild_id)
         settings["bass_boost"] = not settings["bass_boost"]
-        await interaction.response.send_message(f"تم {'تفعيل' if settings['bass_boost'] else 'إيقاف'} الباس للأغاني القادمة.", ephemeral=True)
+        await interaction.response.edit_message(embed=build_now_playing_embed(self.guild_id), view=MusicControlView(self.guild_id))
 
 
 @bot.event
@@ -414,6 +461,10 @@ async def play(ctx, *, search: str):
             if not tracks:
                 return await ctx.send("❌ لم أجد نتائج مناسبة.")
 
+            settings = get_settings(ctx.guild.id)
+            settings["repeat"] = True
+            last_batches[ctx.guild.id] = tracks[:]
+
             queue = get_queue(ctx.guild.id)
             queue.extend(tracks)
 
@@ -422,6 +473,8 @@ async def play(ctx, *, search: str):
                 await ctx.send("🎵 **تم بدء التشغيل:**\n" + "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(tracks[:5])))
             else:
                 await ctx.send("📋 **تمت الإضافة إلى قائمة الانتظار:**\n" + "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(tracks[:5])))
+
+            await refresh_panel_message(ctx.guild.id)
 
         except Exception as e:
             traceback.print_exc()
@@ -444,24 +497,29 @@ async def queue_cmd(ctx):
 async def set_volume(ctx, value: int):
     if value < 0 or value > 200:
         return await ctx.send("❌ اكتب قيمة بين 0 و 200.")
+    await delete_message_safely(ctx.message)
     settings = get_settings(ctx.guild.id)
     settings["volume"] = value / 100
     if ctx.voice_client and ctx.voice_client.source and hasattr(ctx.voice_client.source, "volume"):
         ctx.voice_client.source.volume = settings["volume"]
-    await ctx.send(f"🔊 تم ضبط الصوت إلى {value}%.")
+    await refresh_panel_message(ctx.guild.id)
+    await ctx.send(f"🔊 تم ضبط الصوت إلى {value}%.", delete_after=4)
 
 
 @bot.command(name="باس", aliases=["bass"])
 async def bass(ctx):
+    await delete_message_safely(ctx.message)
     settings = get_settings(ctx.guild.id)
     settings["bass_boost"] = not settings["bass_boost"]
-    await ctx.send(f"🎚️ الباس أصبح: {'مفعّل' if settings['bass_boost'] else 'متوقف'}")
+    await refresh_panel_message(ctx.guild.id)
+    await ctx.send(f"🎚️ الباس أصبح: {'مفعّل' if settings['bass_boost'] else 'متوقف'}", delete_after=4)
 
 
 @bot.command(name="خلط", aliases=["shuffle", "mix"])
 async def shuffle_cmd(ctx):
     if shuffle_queue(ctx.guild.id):
-        await ctx.send("🔀 تم خلط قائمة الانتظار.")
+        await refresh_panel_message(ctx.guild.id)
+        await ctx.send("🔀 تم خلط قائمة الانتظار.", delete_after=4)
     else:
         await ctx.send("❌ لا توجد قائمة كافية للخلط.")
 
@@ -470,7 +528,8 @@ async def shuffle_cmd(ctx):
 async def repeat_cmd(ctx):
     settings = get_settings(ctx.guild.id)
     settings["repeat"] = not settings["repeat"]
-    await ctx.send(f"🔁 التكرار أصبح: {'مفعّل' if settings['repeat'] else 'متوقف'}")
+    await refresh_panel_message(ctx.guild.id)
+    await ctx.send(f"🔁 التكرار أصبح: {'مفعّل' if settings['repeat'] else 'متوقف'}", delete_after=4)
 
 
 @bot.command(name="تخطي", aliases=["skip", "سكب"])
@@ -509,6 +568,8 @@ async def clean(ctx, limit: int = 30):
 @bot.command(name="clear", aliases=["تفريغ"])
 async def clear(ctx):
     queues.get(ctx.guild.id, deque()).clear()
+    last_batches.pop(ctx.guild.id, None)
+    await refresh_panel_message(ctx.guild.id)
     await ctx.send("🧹 تم تفريغ قائمة التشغيل.")
 
 
@@ -516,7 +577,8 @@ async def clear(ctx):
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        await ctx.send("⏸️ تم إيقاف التشغيل مؤقتًا.")
+        await refresh_panel_message(ctx.guild.id)
+        await ctx.send("⏸️ تم إيقاف التشغيل مؤقتًا.", delete_after=4)
     else:
         await ctx.send("❌ لا يوجد شيء قيد التشغيل.")
 
@@ -525,7 +587,8 @@ async def pause(ctx):
 async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
-        await ctx.send("▶️ تم استئناف التشغيل.")
+        await refresh_panel_message(ctx.guild.id)
+        await ctx.send("▶️ تم استئناف التشغيل.", delete_after=4)
     else:
         await ctx.send("❌ لا يوجد شيء متوقف مؤقتًا.")
 
@@ -534,9 +597,16 @@ async def resume(ctx):
 async def stop(ctx):
     queues.get(ctx.guild.id, deque()).clear()
     now_playing.pop(ctx.guild.id, None)
+    last_batches.pop(ctx.guild.id, None)
     skip_once_flags.pop(ctx.guild.id, None)
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
+        panel = panel_messages.pop(ctx.guild.id, None)
+        if panel:
+            try:
+                await panel.delete()
+            except Exception:
+                pass
         await ctx.send("⏹️ تم إيقاف التشغيل ومغادرة الروم.")
     else:
         await ctx.send("❌ البوت ليس داخل روم صوتي.")
@@ -546,9 +616,16 @@ async def stop(ctx):
 async def leave(ctx):
     queues.get(ctx.guild.id, deque()).clear()
     now_playing.pop(ctx.guild.id, None)
+    last_batches.pop(ctx.guild.id, None)
     skip_once_flags.pop(ctx.guild.id, None)
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
+        panel = panel_messages.pop(ctx.guild.id, None)
+        if panel:
+            try:
+                await panel.delete()
+            except Exception:
+                pass
         await ctx.send("👋 تم مغادرة الروم.")
     else:
         await ctx.send("❌ البوت ليس داخل روم صوتي.")
