@@ -92,7 +92,6 @@ async def _send_status(
     message = await ctx.send(
         content=text or None,
         embed=embed,
-        
     )
     schedule_cleanup(message, delay)
     return message
