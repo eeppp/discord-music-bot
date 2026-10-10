@@ -5,7 +5,7 @@ from discord.ext import commands
 import imageio_ffmpeg
 import yt_dlp
 
-# تعيين مسار ffmpeg المدمج تلقائياً لمنع أخطاء النظام
+# تعيين مسار ffmpeg المدمج تلقائياً
 FFMPEG_EXECUTABLE = imageio_ffmpeg.get_ffmpeg_exe()
 
 intents = discord.Intents.default()
@@ -13,16 +13,15 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات yt-dlp مخصصة للعمل عبر SoundCloud لتفادي حظر يوتيوب والـ Cookies
+# خيارات yt-dlp مرنة تتفادى تقييدات يوتيوب
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
     "nocheckcertificate": True,
-    "ignoreerrors": False,
+    "ignoreerrors": True,
     "logtostderr": False,
     "quiet": True,
     "no_warnings": True,
-    "default_search": "scsearch",
     "source_address": "0.0.0.0",
 }
 
@@ -57,28 +56,45 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # إذا أدخل المستخدم رابطاً مباشراً يقرأه، وإلا يبحث في SoundCloud
-        if search_query.startswith("http"):
-            query = search_query
+        # إذا أدخل رابط مباشر
+        if search_query.startswith("http://") or search_query.startswith(
+            "https://"
+        ):
+            search_targets = [search_query]
         else:
-            query = f"scsearch:{search_query}"
+            # يجرب البحث في SoundCloud أولاً ثم البحث العام
+            search_targets = [
+                f"scsearch5:{search_query}",
+                f"ytsearch5:{search_query}",
+            ]
 
-        data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(query, download=False)
-        )
+        data = None
+        for target in search_targets:
+            try:
+                res = await loop.run_in_executor(
+                    None, lambda: ytdl.extract_info(target, download=False)
+                )
+                if not res:
+                    continue
 
-        if not data:
-            raise Exception("لم يتم العثور على نتائج للبحث.")
+                if "entries" in res:
+                    # تصفية النتايج واستخراج أول عنصر صالح
+                    valid_entries = [e for e in res["entries"] if e]
+                    if valid_entries:
+                        data = valid_entries[0]
+                        break
+                else:
+                    data = res
+                    break
+            except Exception:
+                continue
 
-        if "entries" in data:
-            if len(data["entries"]) == 0 or data["entries"][0] is None:
-                raise Exception("لم يتم العثور على مقطع بهذا الاسم.")
-            data = data["entries"][0]
+        if not data or not data.get("url"):
+            raise Exception(
+                "لم يتم العثور على أي نتيجة لمصطلح البحث، جرب كتابة الاسم بشكل أوضح أو استخدم رابطاً مباشراً."
+            )
 
         filename = data.get("url")
-        if not filename:
-            raise Exception("تعذر استخراج رابط الصوت من المصدر.")
-
         return cls(
             discord.FFmpegPCMAudio(
                 filename, executable=FFMPEG_EXECUTABLE, **FFMPEG_OPTIONS
