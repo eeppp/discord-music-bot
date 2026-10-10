@@ -47,6 +47,7 @@ class MusicPlayer:
         self.text_channel: discord.abc.Messageable | None = None
         self._advance_lock = asyncio.Lock()
         self._skip_repeat = False
+        self._settings_loaded = False
 
     async def load_settings(self) -> None:
         settings = await self.database.get_settings(self.guild_id)
@@ -54,6 +55,7 @@ class MusicPlayer:
         self.bass = clamp_bass(settings.get("bass", 0))
         self.autoplay = bool(settings.get("autoplay", int(Config.AUTO_PLAY)))
         self.repeat = bool(settings.get("repeat", 0))
+        self._settings_loaded = True
 
     async def save_settings(self) -> None:
         await self.database.save_settings(
