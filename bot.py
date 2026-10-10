@@ -122,7 +122,7 @@ async def play_command(ctx: commands.Context, *, query: str | None = None) -> No
     await play_query(ctx, query)
 
 
-@bot.hybrid_command(name="صوت", aliases=["volume", "vol"])
+@bot.hybrid_command(name="صوت", aliases=["ص", "volume", "vol"])
 @commands.guild_only()
 async def volume_command(ctx: commands.Context, volume: int | None = None) -> None:
     player = await _voice_player(ctx)
@@ -373,6 +373,7 @@ async def help_command(ctx: commands.Context) -> None:
         title="🎵 أوامر Music S3YD",
         description=(
             f"{prefix}شغل اسم الأغنية أو الرابط — بحث وتشغيل YouTube/SoundCloud\n"
+            f"{prefix}ص 0-200 — ضبط الصوت بسرعة (مثال: {prefix}ص 5)\n"
             f"{prefix}صوت 0-200 — ضبط الصوت\n"
             f"{prefix}تخطي — تخطي الأغنية الحالية\n"
             f"{prefix}تكرار — تشغيل/إيقاف تكرار الأغنية الحالية\n"
