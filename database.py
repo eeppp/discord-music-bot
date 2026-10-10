@@ -27,7 +27,8 @@ class Database:
                     autoplay INTEGER NOT NULL DEFAULT 1,
                     theme TEXT NOT NULL DEFAULT 'Neon',
                     dj_role TEXT NOT NULL DEFAULT 'DJ',
-                    repeat INTEGER NOT NULL DEFAULT 0
+                    repeat INTEGER NOT NULL DEFAULT 0,
+                    effect TEXT NOT NULL DEFAULT 'normal'
                 )
                 """
             )
@@ -35,6 +36,14 @@ class Database:
             try:
                 await db.execute(
                     "ALTER TABLE guild_settings ADD COLUMN repeat INTEGER NOT NULL DEFAULT 0"
+                )
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+
+            try:
+                await db.execute(
+                    "ALTER TABLE guild_settings ADD COLUMN effect TEXT NOT NULL DEFAULT 'normal'"
                 )
             except aiosqlite.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
@@ -103,7 +112,7 @@ class Database:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT volume, bass, autoplay, theme, dj_role, repeat "
+                "SELECT volume, bass, autoplay, theme, dj_role, repeat, effect "
                 "FROM guild_settings WHERE guild_id = ?",
                 (guild_id,),
             )
@@ -117,11 +126,12 @@ class Database:
                 "theme": "Neon",
                 "dj_role": "DJ",
                 "repeat": 0,
+                "effect": "normal",
             }
         return dict(row)
 
     async def save_settings(self, guild_id: int, **values: Any) -> None:
-        allowed = {"volume", "bass", "autoplay", "theme", "dj_role", "repeat"}
+        allowed = {"volume", "bass", "autoplay", "theme", "dj_role", "repeat", "effect"}
         fields = {key: value for key, value in values.items() if key in allowed}
         if not fields:
             return
