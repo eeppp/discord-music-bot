@@ -24,6 +24,7 @@ class Config:
     DATABASE = os.getenv("DATABASE_PATH", "database/music.db")
     LOG_FILE = os.getenv("LOG_FILE", "logs/music.log")
     AUTO_PLAY = os.getenv("AUTO_PLAY", "true").lower() in {"1", "true", "yes", "on"}
+    YOUTUBE_COOKIES_B64 = os.getenv("YOUTUBE_COOKIES_B64", "").strip()
     DJ_ROLE = os.getenv("DJ_ROLE", "DJ")
     DEFAULT_THEME = "Neon"
     VERSION = "2.1.0"

@@ -21,6 +21,7 @@
 - BOT_PREFIX: بادئة الأوامر، افتراضيًا !.
 - DEFAULT_VOLUME: مستوى الصوت الافتراضي بين 0 و200.
 - AUTO_PLAY: تفعيل التشغيل التلقائي، افتراضيًا true.
+- YOUTUBE_COOKIES_B64: اختياري. ملف YouTube بصيغة Netscape مشفر بـ Base64، لمصادقة yt-dlp عند ظهور `Sign in to confirm you're not a bot`. لا تضع قيمة هذا المتغير في GitHub أو Discord أو المحادثات.
 - DATABASE_PATH: مسار قاعدة SQLite.
 - DELETE_DELAY: مدة بقاء ردود البوت المؤقتة بالثواني.
 - MAX_QUEUE: الحد الأقصى للأغاني في قائمة الانتظار.
@@ -28,6 +29,18 @@
 - EMBED_COLOR: لون واجهة البوت بصيغة hex.
 
 لا ترفع ملف .env أو قاعدة البيانات إلى GitHub.
+
+### مصادقة YouTube على الاستضافة
+
+إذا رفض YouTube طلبات الخادم برسالة `Sign in to confirm you're not a bot`، يمكن تمرير ملف cookies اختياريًا عبر `YOUTUBE_COOKIES_B64`. أنشئ ملفًا بصيغة Netscape يحتوي على cookies نطاق YouTube فقط، ثم حوّله محليًا في PowerShell:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("youtube-cookies.txt"))
+```
+
+ضع الناتج كمتغير سرّي `YOUTUBE_COOKIES_B64` في Railway ثم أعد النشر. التطبيق يفكّه في ملف مؤقت بصلاحيات خاصة ويحذفه عند إيقاف العملية. لا ترسل قيمة المتغير أو ملف cookies إلى البوت أو Discord أو GitHub.
+
+**تحذير:** cookies تمنح وصولًا إلى جلسة الحساب. يذكر yt-dlp احتمال حظر حساب YouTube مؤقتًا أو دائمًا عند استخدامها، لذا استخدم حسابًا تجريبيًا فقط، وراجع إرشادات yt-dlp لتصدير cookies بطريقة تقلل تدويرها: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
 
 ## الأوامر العربية
 
