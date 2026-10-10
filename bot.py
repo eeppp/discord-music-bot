@@ -8,7 +8,7 @@ from discord.ext import commands
 import imageio_ffmpeg
 import yt_dlp
 
-FFMPEG_EXECUTABLE = imageio_ffmpeg.get_ffmpeg_exe()
+FFMPEG_EXECUTABLE = os.getenv("FFMPEG_EXECUTABLE", "ffmpeg")
 
 if not discord.opus.is_loaded():
     try:
