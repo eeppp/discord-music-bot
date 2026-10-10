@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -104,8 +105,10 @@ class MusicPlayer:
         if not self.current and self.voice and not self.voice.is_playing() and not self.voice.is_paused():
             await self.advance()
 
-    async def _stream_url(self, song: Song) -> str:
-        def extract(url: str, use_fallback: bool = False) -> str:
+    async def _stream_url(self, song: Song) -> tuple[str, dict[str, str]]:
+        def extract(
+            url: str, use_fallback: bool = False
+        ) -> tuple[str, dict[str, str]]:
             options: dict[str, Any] = {
                 "quiet": True,
                 "no_warnings": True,
@@ -120,20 +123,39 @@ class MusicPlayer:
                 info = next((item for item in info["entries"] if item), None)
             if not isinstance(info, dict) or not info.get("url"):
                 raise ValueError("لم أجد رابط بث صوتي صالحًا.")
-            return str(info["url"])
+            headers = info.get("http_headers")
+            return str(info["url"]), (
+                {str(key): str(value) for key, value in headers.items()}
+                if isinstance(headers, dict)
+                else {}
+            )
 
         try:
             return await asyncio.to_thread(extract, song.link)
         except Exception as first_error:
             try:
                 return await asyncio.to_thread(extract, song.link, True)
-            except Exception:
-                raise first_error
+            except Exception as fallback_error:
+                raise fallback_error from first_error
 
-    def _create_source(self, stream_url: str, start_at: float = 0) -> discord.AudioSource:
+    def _create_source(
+        self,
+        stream_url: str,
+        headers: dict[str, str] | None = None,
+        start_at: float = 0,
+    ) -> discord.AudioSource:
+        options = ffmpeg_options(self.bass, self.effect, start_at=start_at)
+        if headers:
+            header_block = "".join(
+                f"{name}: {value}\r\n"
+                for name, value in headers.items()
+                if name.lower() not in {"host", "content-length"}
+            )
+            if header_block:
+                options["before_options"] += f" -headers {shlex.quote(header_block)}"
         source = discord.FFmpegPCMAudio(
             stream_url,
-            **ffmpeg_options(self.bass, self.effect, start_at=start_at),
+            **options,
         )
         return discord.PCMVolumeTransformer(source, volume=self.volume / 100)
 
@@ -182,9 +204,9 @@ class MusicPlayer:
             logger.warning("Cannot start playback without a connected voice client.")
             return
         try:
-            stream = await self._stream_url(song)
+            stream, headers = await self._stream_url(song)
             self._play_source(
-                self._create_source(stream, start_at=start_at),
+                self._create_source(stream, headers=headers, start_at=start_at),
                 start_at=start_at,
                 start_paused=start_paused,
             )
@@ -356,7 +378,7 @@ class MusicPlayer:
                 return False
 
             try:
-                stream = await self._stream_url(song)
+                stream, headers = await self._stream_url(song)
             except Exception:
                 logger.exception("Could not resolve the current song to update its effects.")
                 return False
@@ -372,7 +394,9 @@ class MusicPlayer:
             position = self._current_position()
             was_paused = voice.is_paused()
             try:
-                source = self._create_source(stream, start_at=position)
+                source = self._create_source(
+                    stream, headers=headers, start_at=position
+                )
             except Exception:
                 logger.exception("Could not prepare the current song with updated effects.")
                 return False
