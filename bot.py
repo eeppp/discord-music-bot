@@ -2,15 +2,17 @@ import asyncio
 import os
 import discord
 from discord.ext import commands
+import imageio_ffmpeg
 import yt_dlp
 
-# 1. إعداد صلاحيات البوت
+# تعيين مسار ffmpeg المدمج تلقائياً لمنع خطأ "ffmpeg was not found"
+FFMPEG_EXECUTABLE = imageio_ffmpeg.get_ffmpeg_exe()
+
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 2. إعدادات البحث عبر SoundCloud لتفادي حظر IP على سيرفرات Railway
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -23,20 +25,16 @@ YTDL_OPTIONS = {
     "source_address": "0.0.0.0",
 }
 
-# 3. إعدادات FFmpeg لضمان استمرار البث وعدم الانقطاع
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
-
-# تخزين قائمة الانتظار لكل سيرفر
 queues = {}
 
 
 def check_queue(ctx, guild_id):
-    """تشغيل المقطع التالي تلقائياً عند انتهاء الحالي"""
     if guild_id in queues and len(queues[guild_id]) > 0:
         next_player = queues[guild_id].pop(0)
         ctx.voice_client.play(
@@ -69,7 +67,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
             raise Exception("لم يتم العثور على رابط صوتي صالح.")
 
         return cls(
-            discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data
+            discord.FFmpegPCMAudio(
+                filename, executable=FFMPEG_EXECUTABLE, **FFMPEG_OPTIONS
+            ),
+            data=data,
         )
 
 
@@ -78,10 +79,9 @@ async def on_ready():
     print(f"✅ تم تسجيل الدخول بنجاح باسم: {bot.user.name}")
 
 
-# أمر فحص لتأكيد أن النسخة الجديدة محدثة وشغالة
 @bot.command(name="check", aliases=["فحص"])
 async def check(ctx):
-    await ctx.send("✅ النسخة المحدثة من البوت شغالّة على Railway بنجاح!")
+    await ctx.send("✅ النسخة المحدثة من البوت شغالة على Railway بنجاح!")
 
 
 @bot.command(name="play", aliases=["p", "شغل", "تشغيل"])
@@ -122,8 +122,6 @@ async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
         await ctx.send("⏭️ تم تخطي المقطع.")
-    else:
-        await ctx.send("❌ لا يوجد مقطع يعمل حالياً لتخطيه.")
 
 
 @bot.command(name="stop", aliases=["ايقاف", "إيقاف", "سكت"])
