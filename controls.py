@@ -85,6 +85,10 @@ async def update_panel(player: MusicPlayer) -> None:
         )
     except discord.NotFound:
         player.panel_message = None
+        try:
+            await player.database.delete_panel(player.guild_id)
+        except Exception:
+            logger.debug("Could not remove a deleted panel record.", exc_info=True)
     except discord.HTTPException:
         logger.exception("Could not update the player panel.")
 
@@ -95,10 +99,15 @@ async def ensure_panel(player: MusicPlayer, channel: discord.abc.Messageable) ->
         await update_panel(player)
         if player.panel_message:
             return
+    player.control_view = panel_view(player)
     player.panel_message = await channel.send(
         embed=player_embed(player),
-        view=PlayerControls(player),
+        view=player.control_view,
     )
+    if player.panel_message.guild:
+        await player.database.save_panel(
+            player.guild_id, player.panel_message.channel.id, player.panel_message.id
+        )
 
 
 async def load_player(guild_id: int, channel: discord.abc.Messageable) -> MusicPlayer:
@@ -209,3 +218,29 @@ async def add_selected_song(
         f"أُضيفت **{discord.utils.escape_markdown(song.title)}** إلى قائمة التشغيل.",
         ephemeral=True,
     )
+
+
+async def restore_panels(bot: commands.Bot) -> None:
+    """Restore persistent controls for previously-created player panels."""
+    for guild_id, channel_id, message_id in await database_for_bot(bot).get_panels():
+        try:
+            channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+            message = await channel.fetch_message(message_id)
+            player = await load_player(guild_id, channel)
+            player.panel_message = message
+            player.control_view = panel_view(player)
+            bot.add_view(player.control_view, message_id=message_id)
+            await update_panel(player)
+        except discord.NotFound:
+            try:
+                player_manager.get(guild_id).database
+            except Exception:
+                pass
+            logger.info("Saved player panel %s was not found.", message_id)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            logger.warning("Could not restore player panel %s.", message_id, exc_info=True)
+
+
+def database_for_bot(bot: commands.Bot):
+    # PlayerManager is configured before restoration starts.
+    return player_manager.database
