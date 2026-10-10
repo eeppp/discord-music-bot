@@ -1,5 +1,6 @@
 import asyncio
 import os
+import aiohttp
 import discord
 from discord.ext import commands
 import imageio_ffmpeg
@@ -12,21 +13,14 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات yt-dlp متقدمة لتجاوز حظر IPs في Railway
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
     "nocheckcertificate": True,
     "ignoreerrors": True,
-    "logtostderr": False,
     "quiet": True,
     "no_warnings": True,
     "source_address": "0.0.0.0",
-    "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.5",
-    },
 }
 
 FFMPEG_OPTIONS = {
@@ -60,63 +54,75 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # 1. إذا كان الرابط صوتياً مباشراً (MP3 / Stream) يتم تشغيله فوراً عبر FFmpeg
+        # 1. إذا كان رابط بث مباشر مباشر (MP3/Stream)
         if search_query.startswith("http") and (
-            ".mp3" in search_query
-            or ".m3u8" in search_query
-            or "stream" in search_query
+            ".mp3" in search_query or "stream" in search_query
         ):
-            data = {"url": search_query, "title": "بث صوتي مباشر"}
             return cls(
                 discord.FFmpegPCMAudio(
                     search_query,
                     executable=FFMPEG_EXECUTABLE,
                     **FFMPEG_OPTIONS,
                 ),
-                data=data,
+                data={"title": "بث صوتي مباشر"},
             )
 
-        # 2. تجهيز هدف البحث للروابط العادية أو الكلمات
-        if search_query.startswith("http"):
-            target = search_query
-        else:
-            target = f"scsearch1:{search_query}"
+        # 2. جلب رابط الصوت لتجاوز حظر Railway عبر Piped API
+        video_id = None
+        if "youtu.be/" in search_query:
+            video_id = search_query.split("youtu.be/")[1].split("?")[0]
+        elif "watch?v=" in search_query:
+            video_id = search_query.split("watch?v=")[1].split("&")[0]
 
-        # 3. محاولة استخراج المقطع بواسطة yt-dlp
-        data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(target, download=False)
-        )
+        audio_url = None
+        title = "مقطع صوتي"
 
-        if not data:
-            # محاولة احتياطية ثانية مع SoundCloud Search
-            if not search_query.startswith("http"):
-                data = await loop.run_in_executor(
-                    None,
-                    lambda: ytdl.extract_info(
-                        f"scsearch:{search_query}", download=False
-                    ),
-                )
+        if video_id:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"https://pipedapi.kavin.rocks/streams/{video_id}"
+                    ) as resp:
+                        if resp.status == 200:
+                            res_data = await resp.json()
+                            title = res_data.get("title", "مقطع صوتي")
+                            audio_streams = res_data.get("audioStreams", [])
+                            if audio_streams:
+                                audio_url = audio_streams[0].get("url")
+            except Exception:
+                pass
 
-        if not data:
-            raise RuntimeError(
-                "تعذر استخراج الصوت من هذا المصدر بسبب حظر IP سيرفر الاستضافة."
+        # 3. إذا لم ينجح عبر API يرجع لـ yt-dlp كخيار ثانٍ
+        if not audio_url:
+            target = (
+                search_query
+                if search_query.startswith("http")
+                : f"scsearch1:{search_query}"
+            )
+            data = await loop.run_in_executor(
+                None, lambda: ytdl.extract_info(target, download=False)
             )
 
-        if "entries" in data:
-            valid_entries = [e for e in data["entries"] if e and e.get("url")]
-            if not valid_entries:
-                raise RuntimeError("لم يتم العثور على نتائج لطلب البحث.")
-            data = valid_entries[0]
+            if not data:
+                raise Exception("تعذر جلب المقطع بسبب حظر السيرفر.")
 
-        filename = data.get("url")
-        if not filename:
-            raise RuntimeError("تعذر الحصول على رابط البث الصوتي.")
+            if "entries" in data:
+                entries = [e for e in data["entries"] if e and e.get("url")]
+                if not entries:
+                    raise Exception("لم يتم العثور على نتائج.")
+                data = entries[0]
+
+            audio_url = data.get("url")
+            title = data.get("title", "مقطع صوتي")
+
+        if not audio_url:
+            raise Exception("تعذر جلب رابط الصوت.")
 
         return cls(
             discord.FFmpegPCMAudio(
-                filename, executable=FFMPEG_EXECUTABLE, **FFMPEG_OPTIONS
+                audio_url, executable=FFMPEG_EXECUTABLE, **FFMPEG_OPTIONS
             ),
-            data=data,
+            data={"title": title},
         )
 
 
@@ -160,7 +166,7 @@ async def play(ctx, *, search: str):
                 await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
 
         except Exception as e:
-            await ctx.send(f"⚠️ **تنبيه:** `{str(e)}`")
+            await ctx.send(f"⚠️ **حدث خطأ:** `{str(e)}`")
 
 
 @bot.command(name="skip", aliases=["تخطي", "سكب"])
