@@ -57,6 +57,8 @@ class MusicPlayer:
         self._track_rate = 1.0
         self._skip_repeat = False
         self._settings_loaded = False
+        self._autoplay_seed: str | None = None
+        self._consecutive_failures = 0
 
     async def load_settings(self) -> None:
         settings = await self.database.get_settings(self.guild_id)
@@ -96,6 +98,8 @@ class MusicPlayer:
     async def enqueue(self, song: Song, channel: discord.abc.GuildChannel | None = None) -> None:
         if channel is not None:
             await self.connect(channel)
+        # A new user request starts a fresh playback attempt window.
+        self._consecutive_failures = 0
         self.queue.add(song)
         if not self.current and self.voice and not self.voice.is_playing() and not self.voice.is_paused():
             await self.advance()
@@ -147,10 +151,8 @@ class MusicPlayer:
         loop = asyncio.get_running_loop()
 
         def after(error: Exception | None) -> None:
-            if error:
-                logger.error("Audio playback failed in guild %s: %s", self.guild_id, error)
             loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(self._after_track(generation))
+                lambda: asyncio.create_task(self._after_track(generation, error))
             )
 
         self.voice.play(source, after=after)
@@ -186,23 +188,30 @@ class MusicPlayer:
                 start_at=start_at,
                 start_paused=start_paused,
             )
-            await self._refresh_panel()
         except Exception as exc:
             logger.exception("Could not play %s: %s", song.title, exc)
-            if self.text_channel:
-                try:
-                    await self.text_channel.send(
-                        f"⚠️ تعذّر تشغيل **{discord.utils.escape_markdown(song.title)}**. "
-                        "سأتجاوزها وأحاول تشغيل التالية."
-                    )
-                except discord.HTTPException:
-                    pass
-            await self.advance(force=True)
+            await self._handle_playback_failure(song)
+            return
+        await self._refresh_panel()
 
-    async def _after_track(self, generation: int) -> None:
+    async def _after_track(
+        self, generation: int, error: Exception | None = None
+    ) -> None:
         if generation != self._playback_generation:
             return
         self._track_started_at = None
+        if error is not None:
+            logger.error(
+                "Audio playback failed in guild %s: %s",
+                self.guild_id,
+                error,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+            if self.current:
+                await self._handle_playback_failure(self.current)
+            return
+
+        self._consecutive_failures = 0
         if self.current:
             try:
                 await self.database.add_history(
@@ -212,7 +221,34 @@ class MusicPlayer:
                 logger.exception("Could not store playback history.")
         await self.advance()
 
-    async def advance(self, force: bool = False) -> None:
+    async def _handle_playback_failure(self, song: Song) -> None:
+        self._consecutive_failures += 1
+        stopped = self._consecutive_failures >= 3
+        message = (
+            f"⚠️ تعذّر تشغيل **{discord.utils.escape_markdown(song.title)}**. "
+            "سأتجاوزها وأحاول تشغيل التالية من قائمة الانتظار."
+        )
+        if stopped:
+            message += " أوقفت المحاولات بعد عدة أخطاء، وبقية القائمة محفوظة."
+        if self.text_channel:
+            try:
+                await self.text_channel.send(message)
+            except discord.HTTPException:
+                pass
+
+        if stopped:
+            self.current = None
+            self._track_offset = 0.0
+            self._track_started_at = None
+            await self._refresh_panel()
+            return
+
+        # Playback failures must not start another Autoplay search.
+        await self.advance(force=True, allow_autoplay=False)
+
+    async def advance(
+        self, force: bool = False, allow_autoplay: bool = True
+    ) -> None:
         async with self._advance_lock:
             if self.voice and (self.voice.is_playing() or self.voice.is_paused()):
                 return
@@ -225,12 +261,13 @@ class MusicPlayer:
             else:
                 next_song = self.queue.pop()
 
-            if next_song is None and self.current and self.autoplay:
+            if next_song is None and self.current and self.autoplay and allow_autoplay:
                 try:
                     from search import music_search
 
+                    seed = self._autoplay_seed or self.current.title
                     candidates = await music_search.search(
-                        f"{self.current.title} similar songs", limit=5
+                        f"{seed} similar songs", limit=5
                     )
                     next_song = next(
                         (candidate for candidate in candidates
@@ -248,6 +285,8 @@ class MusicPlayer:
                 return
 
             self.current = next_song
+            if next_song.requester is not None:
+                self._autoplay_seed = next_song.title
 
         await self._start_song(next_song)
 
