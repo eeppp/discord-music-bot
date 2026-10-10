@@ -167,9 +167,15 @@ class BassSelect(discord.ui.Select):
         await interaction.response.defer(ephemeral=True)
         self.player.set_bass(int(self.values[0]))
         await self.player.save_settings()
+        applied = await self.player.apply_effects_to_current()
         await self.player._refresh_panel()
+        effect_status = (
+            "وطُبّق على الأغنية الحالية من موضعها."
+            if applied
+            else "سيُطبّق على الأغنية التالية."
+        )
         await interaction.followup.send(
-            f"تم ضبط Bass Boost على {self.player.bass}/10. سيطبّق على الأغنية التالية.",
+            f"تم ضبط Bass Boost على {self.player.bass}/10، {effect_status}",
             ephemeral=True,
         )
 
@@ -202,9 +208,15 @@ class EffectSelect(discord.ui.Select):
         await interaction.response.defer(ephemeral=True)
         self.player.set_effect(self.values[0])
         await self.player.save_settings()
+        applied = await self.player.apply_effects_to_current()
         await self.player._refresh_panel()
+        effect_status = (
+            "وطُبّق على الأغنية الحالية من موضعها."
+            if applied
+            else "سيُطبّق على الأغنية التالية."
+        )
         await interaction.followup.send(
-            "تم اختيار المؤثر. سيطبّق على الأغنية التالية.",
+            f"تم اختيار المؤثر {effect_status}",
             ephemeral=True,
         )
 

@@ -257,8 +257,17 @@ async def bass_command(ctx: commands.Context, level: int | None = None) -> None:
         return
     player.set_bass(level)
     await player.save_settings()
+    applied = await player.apply_effects_to_current()
     await ensure_panel(player, ctx.channel)
-    await _send_status(ctx, f"🎚️ Bass Boost مضبوط على {player.bass}/10، ويطبّق على الأغنية التالية.")
+    effect_status = (
+        "وطُبّق على الأغنية الحالية من موضعها."
+        if applied
+        else "سيُطبّق على الأغنية التالية."
+    )
+    await _send_status(
+        ctx,
+        f"🎚️ Bass Boost مضبوط على {player.bass}/10، {effect_status}",
+    )
 
 
 @bot.hybrid_command(name="تأثير", description="اختيار المؤثر الصوتي")
@@ -285,10 +294,16 @@ async def effect_command(
 
     player.set_effect(normalized)
     await player.save_settings()
+    applied = await player.apply_effects_to_current()
     await ensure_panel(player, ctx.channel)
+    effect_status = (
+        "وطُبّق على الأغنية الحالية من موضعها."
+        if applied
+        else "سيُطبّق على الأغنية التالية."
+    )
     await _send_status(
         ctx,
-        f"🎛️ تم اختيار مؤثر {EFFECT_NAMES[normalized]} للأغنية التالية.",
+        f"🎛️ تم اختيار مؤثر {EFFECT_NAMES[normalized]}، {effect_status}",
     )
 
 
