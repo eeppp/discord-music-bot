@@ -20,6 +20,7 @@ class PlayerControls(discord.ui.View):
         self.player = player
         self.add_item(VolumeSelect(player))
         self.add_item(BassSelect(player))
+        self.add_item(EffectSelect(player))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         voice = getattr(interaction.user, "voice", None)
@@ -142,6 +143,37 @@ class BassSelect(discord.ui.Select):
         await self.player._refresh_panel()
         await interaction.response.send_message(
             f"تم ضبط Bass Boost على {self.player.bass}/10. سيطبّق على الصوت الحالي بعد تخطيه.",
+            ephemeral=True,
+        )
+
+
+class EffectSelect(discord.ui.Select):
+    def __init__(self, player: MusicPlayer) -> None:
+        self.player = player
+        options = [
+            discord.SelectOption(label="عادي", value="normal"),
+            discord.SelectOption(label="Bass Boost", value="bass"),
+            discord.SelectOption(label="Treble", value="treble"),
+            discord.SelectOption(label="Nightcore", value="nightcore"),
+            discord.SelectOption(label="8D", value="8d"),
+        ]
+        super().__init__(
+            placeholder="🎛️ اختر المؤثر الصوتي",
+            custom_id="music:effect",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=4,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not self.view or not await self.view.interaction_check(interaction):
+            return
+        self.player.set_effect(self.values[0])
+        await self.player.save_settings()
+        await self.player._refresh_panel()
+        await interaction.response.send_message(
+            "تم اختيار المؤثر. سيطبّق على الأغنية التالية.",
             ephemeral=True,
         )
 
