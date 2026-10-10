@@ -13,7 +13,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات yt-dlp مرنة تتفادى تقييدات يوتيوب
+# خيارات yt-dlp محسنة ومستقرة مع خوادم الاستضافة
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -56,15 +56,14 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # إذا أدخل رابط مباشر
+        # إعداد مصادر البحث المحتملة
         if search_query.startswith("http://") or search_query.startswith(
             "https://"
         ):
             search_targets = [search_query]
         else:
-            # يجرب البحث في SoundCloud أولاً ثم البحث العام
             search_targets = [
-                f"scsearch5:{search_query}",
+                f"scsearch10:{search_query}",
                 f"ytsearch5:{search_query}",
             ]
 
@@ -78,21 +77,20 @@ class YTDLSource(discord.PCMVolumeTransformer):
                     continue
 
                 if "entries" in res:
-                    # تصفية النتايج واستخراج أول عنصر صالح
-                    valid_entries = [e for e in res["entries"] if e]
+                    valid_entries = [
+                        e for e in res["entries"] if e and e.get("url")
+                    ]
                     if valid_entries:
                         data = valid_entries[0]
                         break
-                else:
+                elif res.get("url"):
                     data = res
                     break
             except Exception:
                 continue
 
         if not data or not data.get("url"):
-            raise Exception(
-                "لم يتم العثور على أي نتيجة لمصطلح البحث، جرب كتابة الاسم بشكل أوضح أو استخدم رابطاً مباشراً."
-            )
+            raise Exception("لم يتم العثور على أي نتائج، جرب كتابة اسم المقطع بشكل مختلف أو استعمل رابطاً مباشراً.")
 
         filename = data.get("url")
         return cls(
