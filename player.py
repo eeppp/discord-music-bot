@@ -7,6 +7,7 @@ import binascii
 import logging
 import os
 import shlex
+import shutil
 import tempfile
 import threading
 import time
@@ -121,6 +122,9 @@ class MusicPlayer:
         self._settings_loaded = False
         self._autoplay_seed: str | None = None
         self._consecutive_failures = 0
+        self._youtube_download_dir: str | None = None
+        self._youtube_download_link: str | None = None
+        self._youtube_download_path: str | None = None
 
     async def load_settings(self) -> None:
         settings = await self.database.get_settings(self.guild_id)
@@ -204,6 +208,94 @@ class MusicPlayer:
             except Exception as fallback_error:
                 raise fallback_error from first_error
 
+    @staticmethod
+    def _is_youtube_url(url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return host == "youtu.be" or host.endswith("youtube.com")
+
+    def _cleanup_youtube_download(self) -> None:
+        directory = self._youtube_download_dir
+        self._youtube_download_dir = None
+        self._youtube_download_link = None
+        self._youtube_download_path = None
+        if directory:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def _download_youtube_audio(self, url: str) -> tuple[str, str]:
+        """Download YouTube audio with yt-dlp so its cookies and headers are used."""
+        directory = tempfile.mkdtemp(prefix="music-s3yd-track-")
+        options: dict[str, Any] = {
+            "format": "bestaudio/best",
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "outtmpl": os.path.join(directory, "%(id)s.%(ext)s"),
+        }
+        cookie_file = _get_youtube_cookie_file()
+        if cookie_file:
+            options["cookiefile"] = cookie_file
+
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if isinstance(info, dict) and info.get("entries"):
+                    info = next((item for item in info["entries"] if item), None)
+                if not isinstance(info, dict):
+                    raise ValueError("yt-dlp did not return downloaded audio metadata.")
+
+                requested = info.get("requested_downloads") or []
+                path = next(
+                    (
+                        str(item.get("filepath"))
+                        for item in requested
+                        if isinstance(item, dict)
+                        and item.get("filepath")
+                        and os.path.isfile(str(item["filepath"]))
+                    ),
+                    None,
+                )
+                if not path:
+                    candidate = ydl.prepare_filename(info)
+                    if os.path.isfile(candidate):
+                        path = candidate
+                if not path:
+                    path = next(
+                        (
+                            os.path.join(directory, name)
+                            for name in os.listdir(directory)
+                            if not name.endswith((".part", ".ytdl"))
+                            and os.path.isfile(os.path.join(directory, name))
+                        ),
+                        None,
+                    )
+                if not path:
+                    raise FileNotFoundError("yt-dlp finished without an audio file.")
+                return directory, path
+        except Exception:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+
+    async def _playback_input(
+        self, song: Song, start_at: float = 0
+    ) -> discord.AudioSource:
+        if self._is_youtube_url(song.link):
+            if (
+                self._youtube_download_link != song.link
+                or not self._youtube_download_path
+                or not os.path.isfile(self._youtube_download_path)
+            ):
+                self._cleanup_youtube_download()
+                directory, path = await asyncio.to_thread(
+                    self._download_youtube_audio, song.link
+                )
+                self._youtube_download_dir = directory
+                self._youtube_download_link = song.link
+                self._youtube_download_path = path
+            return self._create_source(self._youtube_download_path, start_at=start_at)
+
+        stream, headers = await self._stream_url(song)
+        return self._create_source(stream, headers=headers, start_at=start_at)
+
     def _create_source(
         self,
         stream_url: str,
@@ -211,6 +303,10 @@ class MusicPlayer:
         start_at: float = 0,
     ) -> discord.AudioSource:
         options = ffmpeg_options(self.bass, self.effect, start_at=start_at)
+        if os.path.isfile(stream_url):
+            options["before_options"] = (
+                f"-ss {max(0.0, start_at):.3f}" if start_at > 0 else ""
+            )
         if headers:
             header_block = "".join(
                 f"{name}: {value}\r\n"
@@ -270,9 +366,8 @@ class MusicPlayer:
             logger.warning("Cannot start playback without a connected voice client.")
             return
         try:
-            stream, headers = await self._stream_url(song)
             self._play_source(
-                self._create_source(stream, headers=headers, start_at=start_at),
+                await self._playback_input(song, start_at=start_at),
                 start_at=start_at,
                 start_paused=start_paused,
             )
@@ -325,6 +420,7 @@ class MusicPlayer:
                 pass
 
         if stopped:
+            self._cleanup_youtube_download()
             self.current = None
             self._track_offset = 0.0
             self._track_started_at = None
@@ -343,6 +439,8 @@ class MusicPlayer:
             if self._skip_repeat:
                 force = True
                 self._skip_repeat = False
+
+            previous_song = self.current
 
             if self.current and self.repeat and not force:
                 next_song = self.current
@@ -366,12 +464,15 @@ class MusicPlayer:
                     logger.exception("Autoplay search failed.")
 
             if next_song is None:
+                self._cleanup_youtube_download()
                 self.current = None
                 self._track_offset = 0.0
                 self._track_started_at = None
                 await self._refresh_panel()
                 return
 
+            if next_song is not previous_song:
+                self._cleanup_youtube_download()
             self.current = next_song
             if next_song.requester is not None:
                 self._autoplay_seed = next_song.title
@@ -404,6 +505,7 @@ class MusicPlayer:
 
     async def stop(self, disconnect: bool = False) -> None:
         self.queue.clear()
+        self._cleanup_youtube_download()
         self.current = None
         self._track_offset = 0.0
         self._track_started_at = None
@@ -443,12 +545,6 @@ class MusicPlayer:
             ):
                 return False
 
-            try:
-                stream, headers = await self._stream_url(song)
-            except Exception:
-                logger.exception("Could not resolve the current song to update its effects.")
-                return False
-
             if (
                 self.current is not song
                 or self.voice is not voice
@@ -460,9 +556,7 @@ class MusicPlayer:
             position = self._current_position()
             was_paused = voice.is_paused()
             try:
-                source = self._create_source(
-                    stream, headers=headers, start_at=position
-                )
+                source = await self._playback_input(song, start_at=position)
             except Exception:
                 logger.exception("Could not prepare the current song with updated effects.")
                 return False
