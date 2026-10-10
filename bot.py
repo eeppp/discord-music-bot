@@ -4,13 +4,13 @@ import discord
 from discord.ext import commands
 import yt_dlp
 
-# صلاحيات البوت
+# 1. إعداد صلاحيات البوت
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات البحث عبر SoundCloud لتفادي حظر خوادم Railway
+# 2. إعدادات البحث عبر SoundCloud لتفادي حظر IP على سيرفرات Railway
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -23,7 +23,7 @@ YTDL_OPTIONS = {
     "source_address": "0.0.0.0",
 }
 
-# خيارات FFmpeg المحدثة لثبات البث الصوتي
+# 3. إعدادات FFmpeg لضمان استمرار البث وعدم الانقطاع
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
@@ -31,12 +31,12 @@ FFMPEG_OPTIONS = {
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 
-# تخزين قوائم التشغيل لكل سيرفر
+# تخزين قائمة الانتظار لكل سيرفر
 queues = {}
 
 
 def check_queue(ctx, guild_id):
-    """دالة للانتقال للمقطع التالي تلقائياً عند انتهاء الحالي"""
+    """تشغيل المقطع التالي تلقائياً عند انتهاء الحالي"""
     if guild_id in queues and len(queues[guild_id]) > 0:
         next_player = queues[guild_id].pop(0)
         ctx.voice_client.play(
@@ -75,12 +75,17 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
 @bot.event
 async def on_ready():
-    print(f"✅ تم تشغيل البوت بنجاح باسم: {bot.user.name}")
+    print(f"✅ تم تسجيل الدخول بنجاح باسم: {bot.user.name}")
+
+
+# أمر فحص لتأكيد أن النسخة الجديدة محدثة وشغالة
+@bot.command(name="check", aliases=["فحص"])
+async def check(ctx):
+    await ctx.send("✅ النسخة المحدثة من البوت شغالّة على Railway بنجاح!")
 
 
 @bot.command(name="play", aliases=["p", "شغل", "تشغيل"])
 async def play(ctx, *, search: str):
-    """أمر تشغيل الصوت أو إضافته للقائمة"""
     if not ctx.author.voice:
         await ctx.send("❌ يجب أن تكون في روم صوتي أولاً!")
         return
@@ -114,7 +119,6 @@ async def play(ctx, *, search: str):
 
 @bot.command(name="skip", aliases=["تخطي", "سكب"])
 async def skip(ctx):
-    """أمر تخطي المقطع الحالي"""
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
         await ctx.send("⏭️ تم تخطي المقطع.")
@@ -122,25 +126,8 @@ async def skip(ctx):
         await ctx.send("❌ لا يوجد مقطع يعمل حالياً لتخطيه.")
 
 
-@bot.command(name="pause", aliases=["توقيف"])
-async def pause(ctx):
-    """إيقاف مؤقت"""
-    if ctx.voice_client and ctx.voice_client.is_playing():
-        ctx.voice_client.pause()
-        await ctx.send("⏸️ تم الإيقاف المؤقت.")
-
-
-@bot.command(name="resume", aliases=["كمل"])
-async def resume(ctx):
-    """استئناف التشغيل"""
-    if ctx.voice_client and ctx.voice_client.is_paused():
-        ctx.voice_client.resume()
-        await ctx.send("▶️ تم استئناف التشغيل.")
-
-
 @bot.command(name="stop", aliases=["ايقاف", "إيقاف", "سكت"])
 async def stop(ctx):
-    """إيقاف شامل ومغادرة"""
     guild_id = ctx.guild.id
     if guild_id in queues:
         queues[guild_id].clear()
