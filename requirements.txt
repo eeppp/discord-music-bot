@@ -1,5 +1,1 @@
-discord.py[voice]
-yt-dlp
-imageio_ffmpeg
-aiohttp
-PyNaCl
+
