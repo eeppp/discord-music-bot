@@ -131,7 +131,7 @@ class Database:
             return {
                 "volume": Config.DEFAULT_VOLUME,
                 "bass": 0,
-                "autoplay": 1,
+                "autoplay": int(Config.AUTO_PLAY),
                 "theme": "Neon",
                 "dj_role": Config.DJ_ROLE,
                 "repeat": 0,
