@@ -89,10 +89,10 @@ async def _send_status(
     embed: discord.Embed | None = None,
     delay: int | None = None,
 ) -> discord.Message:
-    message = await ctx.reply(
+    message = await ctx.send(
         content=text or None,
         embed=embed,
-        mention_author=False,
+        
     )
     schedule_cleanup(message, delay)
     return message
@@ -195,7 +195,7 @@ async def shuffle_command(ctx: commands.Context) -> None:
 @commands.guild_only()
 async def queue_command(ctx: commands.Context) -> None:
     player = await load_player(ctx.guild.id, ctx.channel)
-    message = await ctx.reply(embed=queue_embed(player), mention_author=False)
+    message = await ctx.send(embed=queue_embed(player))
     schedule_cleanup(message)
 
 
@@ -321,6 +321,7 @@ async def clean_command(ctx: commands.Context, limit: int = 100) -> None:
     limit = max(1, min(500, limit))
     player = player_manager.players.get(ctx.guild.id)
     panel_id = player.panel_message.id if player and player.panel_message else None
+    await ctx.defer()
     deleted = await ctx.channel.purge(
         limit=limit,
         check=lambda message: (
@@ -375,7 +376,7 @@ async def help_command(ctx: commands.Context) -> None:
         ),
         color=Config.EMBED_COLOR,
     )
-    message = await ctx.reply(embed=embed, mention_author=False)
+    message = await ctx.send(embed=embed)
     schedule_cleanup(message, 60)
 
 
@@ -414,7 +415,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
         await _send_status(ctx, "يحتاج البوت صلاحية إدارة الرسائل في هذه القناة.")
         return
     if isinstance(error, commands.NoPrivateMessage):
-        await ctx.reply("هذا الأمر يعمل داخل خادم Discord فقط.", mention_author=False)
+        await ctx.send("هذا الأمر يعمل داخل خادم Discord فقط.")
         return
     if isinstance(error, commands.BadArgument):
         await _send_status(ctx, "تحقق من الرقم أو طريقة كتابة الأمر.")
