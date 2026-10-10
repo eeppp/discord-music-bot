@@ -44,6 +44,7 @@ class MusicPlayer:
         self.autoplay = Config.AUTO_PLAY
         self.voice: discord.VoiceClient | None = None
         self.panel_message: discord.Message | None = None
+        self.control_view: discord.ui.View | None = None
         self.text_channel: discord.abc.Messageable | None = None
         self._advance_lock = asyncio.Lock()
         self._skip_repeat = False
