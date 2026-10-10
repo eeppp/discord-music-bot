@@ -17,6 +17,7 @@ from controls import (
     restore_panels,
 )
 from database import Database
+from effects import EFFECT_NAMES, VALID_EFFECTS, normalize_effect
 from player import player_manager
 from permissions import DJ_DENIED_MESSAGE, has_dj_access
 
@@ -259,6 +260,37 @@ async def bass_command(ctx: commands.Context, level: int | None = None) -> None:
     await player.save_settings()
     await ensure_panel(player, ctx.channel)
     await _send_status(ctx, f"🎚️ Bass Boost مضبوط على {player.bass}/10، ويطبّق على الأغنية التالية.")
+
+
+@bot.hybrid_command(name="تأثير", description="اختيار المؤثر الصوتي")
+@commands.guild_only()
+async def effect_command(
+    ctx: commands.Context,
+    effect: str | None = None,
+) -> None:
+    player = await _voice_player(ctx)
+    if not player:
+        return
+    if not await _require_dj(ctx, player):
+        return
+    if not effect:
+        await ensure_panel(player, ctx.channel)
+        await _send_status(ctx, "اختر المؤثر من قائمة 🎛️ في لوحة المشغّل.")
+        return
+
+    normalized = normalize_effect(effect)
+    aliases = {"عادي", "إيقاف", "off", "جهير", "باس", "تريبل", "نايتكور", "٨دي", "8دي"}
+    if effect.casefold() not in VALID_EFFECTS and effect.casefold() not in aliases:
+        await _send_status(ctx, "المؤثرات: normal, bass, treble, nightcore, 8d.")
+        return
+
+    player.set_effect(normalized)
+    await player.save_settings()
+    await ensure_panel(player, ctx.channel)
+    await _send_status(
+        ctx,
+        f"🎛️ تم اختيار مؤثر {EFFECT_NAMES[normalized]} للأغنية التالية.",
+    )
 
 
 @bot.hybrid_command(name="تلقائي", aliases=["autoplay", "راديو"])
