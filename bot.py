@@ -328,7 +328,7 @@ async def clean_command(ctx: commands.Context, limit: int = 100) -> None:
             and message.author.id == bot.user.id
             and message.id != panel_id
         ),
-        bulk=True,
+        bulk=False,
     )
     status = await ctx.send(f"🧹 حذفت {len(deleted)} رسالة قديمة للبوت.")
     schedule_cleanup(status, 8)
