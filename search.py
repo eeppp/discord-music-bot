@@ -147,6 +147,15 @@ class MusicSearch:
             results.extend(song for song in extras if song.webpage not in known)
             results = results[:limit]
 
+        if len(self._cache) >= 500:
+            expired = [
+                cache_key for cache_key, (created, _) in self._cache.items()
+                if now - created >= self.cache_seconds
+            ]
+            for cache_key in expired:
+                self._cache.pop(cache_key, None)
+            if len(self._cache) >= 500:
+                self._cache.pop(next(iter(self._cache)))
         self._cache[key] = (now, results)
         return results
 
