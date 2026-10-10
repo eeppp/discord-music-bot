@@ -22,6 +22,12 @@ def format_duration(seconds: int) -> str:
     return f"{hours}:{minutes:02}:{seconds:02}" if hours else f"{minutes}:{seconds:02}"
 
 
+def panel_view(player: MusicPlayer) -> PlayerControls:
+    if player.control_view is None or player.control_view.is_finished():
+        player.control_view = PlayerControls(player)
+    return player.control_view
+
+
 def player_embed(player: MusicPlayer) -> discord.Embed:
     embed = discord.Embed(title="🎵 مشغّل Music S3YD", color=Config.EMBED_COLOR)
     if player.current:
@@ -75,7 +81,7 @@ async def update_panel(player: MusicPlayer) -> None:
     try:
         await player.panel_message.edit(
             embed=player_embed(player),
-            view=PlayerControls(player),
+            view=panel_view(player),
         )
     except discord.NotFound:
         player.panel_message = None
