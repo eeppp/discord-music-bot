@@ -57,7 +57,10 @@ class MusicPlayer:
         self.volume = max(0, min(200, int(settings.get("volume", Config.DEFAULT_VOLUME))))
         self.bass = clamp_bass(settings.get("bass", 0))
         self.effect = normalize_effect(str(settings.get("effect", "normal")))
-        self.dj_role = str(settings.get("dj_role", Config.DJ_ROLE) or Config.DJ_ROLE)
+        saved_dj_role = str(settings.get("dj_role") or "")
+        if saved_dj_role == "DJ" and Config.DJ_ROLE != "DJ":
+            saved_dj_role = Config.DJ_ROLE
+        self.dj_role = saved_dj_role or Config.DJ_ROLE
         self.autoplay = bool(settings.get("autoplay", int(Config.AUTO_PLAY)))
         self.repeat = bool(settings.get("repeat", 0))
         self._settings_loaded = True
