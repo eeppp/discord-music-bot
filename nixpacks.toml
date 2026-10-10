@@ -1,5 +1,0 @@
-[providers]
-providers = ["python"]
-
-[pkgs]
-pkgs = ["ffmpeg"]
