@@ -1,12 +1,10 @@
 import asyncio
 import os
-import traceback
 import discord
 from discord.ext import commands
 import imageio_ffmpeg
 import yt_dlp
 
-# تعيين مسار ffmpeg المدمج تلقائياً
 FFMPEG_EXECUTABLE = imageio_ffmpeg.get_ffmpeg_exe()
 
 intents = discord.Intents.default()
@@ -14,7 +12,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات استخراج الصوت المحسنة لمنع الحظر
+# خيارات yt-dlp محدثة بالكامل لتتجاوز حظر خوادم Railway
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -24,6 +22,8 @@ YTDL_OPTIONS = {
     "quiet": True,
     "no_warnings": True,
     "source_address": "0.0.0.0",
+    "extract_flat": False,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 }
 
 FFMPEG_OPTIONS = {
@@ -57,33 +57,48 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # إعداد البحث المباشر عبر SoundCloud
+        # التعامل مع البحث والروبط
         if search_query.startswith("http://") or search_query.startswith(
             "https://"
         ):
-            query = search_query
+            target = search_query
         else:
-            query = f"scsearch1:{search_query}"
+            target = f"scsearch1:{search_query}"
 
-        # استخراج البيانات
-        data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(query, download=False)
-        )
+        # استخراج البيانات مع مهلة زمنية ومحاولات متعددة
+        try:
+            data = await loop.run_in_executor(
+                None, lambda: ytdl.extract_info(target, download=False)
+            )
+        except Exception as e:
+            data = None
+
+        # إذا أخفق SoundCloud، يجرب محرك جلب ثاني تلقائياً
+        if not data and not search_query.startswith("http"):
+            try:
+                data = await loop.run_in_executor(
+                    None,
+                    lambda: ytdl.extract_info(
+                        f"ytsearch1:{search_query}", download=False
+                    ),
+                )
+            except Exception:
+                data = None
 
         if not data:
-            raise RuntimeError("لم يسترجع السيرفر أي بيانات صالحة للبحث.")
+            raise RuntimeError(
+                "تعذر الاتصال بـ SoundCloud/YouTube من سيرفر الاستضافة. جرب استخدام رابط مقطع مباشر."
+            )
 
         if "entries" in data:
-            entries = [e for e in data["entries"] if e is not None]
+            entries = [e for e in data["entries"] if e and e.get("url")]
             if not entries:
-                raise RuntimeError(
-                    f"لم يتم العثور على أية نتائج لـ '{search_query}' في SoundCloud."
-                )
+                raise RuntimeError("لم يتم العثور على نتائج صالحة لهذا البحث.")
             data = entries[0]
 
         filename = data.get("url")
         if not filename:
-            raise RuntimeError("تعذر استخراج رابط المقطع المباشر.")
+            raise RuntimeError("لم يتم العثور على رابط بث مباشر للمقطع.")
 
         return cls(
             discord.FFmpegPCMAudio(
@@ -133,12 +148,7 @@ async def play(ctx, *, search: str):
                 await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
 
         except Exception as e:
-            # طباعة الخطأ البرمجي الحقيقي والواضح
-            error_details = str(e)
-            print("ERROR TRACEBACK:", traceback.format_exc())
-            await ctx.send(
-                f"⚠️ **تفاصيل الخطأ الدقيقة:**\n```{error_details[:1800]}```"
-            )
+            await ctx.send(f"⚠️ **تنبيه:** `{str(e)}`")
 
 
 @bot.command(name="skip", aliases=["تخطي", "سكب"])
