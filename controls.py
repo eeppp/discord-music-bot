@@ -222,7 +222,7 @@ async def add_selected_song(
 
 async def restore_panels(bot: commands.Bot) -> None:
     """Restore persistent controls for previously-created player panels."""
-    for guild_id, channel_id, message_id in await database_for_bot(bot).get_panels():
+    for guild_id, channel_id, message_id in await player_manager.database.get_panels():
         try:
             channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
             message = await channel.fetch_message(message_id)
@@ -232,15 +232,8 @@ async def restore_panels(bot: commands.Bot) -> None:
             bot.add_view(player.control_view, message_id=message_id)
             await update_panel(player)
         except discord.NotFound:
-            try:
-                player_manager.get(guild_id).database
-            except Exception:
-                pass
-            logger.info("Saved player panel %s was not found.", message_id)
+            await player_manager.database.delete_panel(guild_id)
+            logger.info("Removed missing player panel %s.", message_id)
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             logger.warning("Could not restore player panel %s.", message_id, exc_info=True)
 
-
-def database_for_bot(bot: commands.Bot):
-    # PlayerManager is configured before restoration starts.
-    return player_manager.database
