@@ -7,7 +7,6 @@ import binascii
 import logging
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -129,40 +128,16 @@ class YtDlpPipeAudio(discord.AudioSource):
         )
 
         try:
+            if self._yt_process.stdout is None:
+                raise RuntimeError("yt-dlp did not create an output pipe.")
             self._ffmpeg = discord.FFmpegPCMAudio(
-                "pipe:0",
+                self._yt_process.stdout,
                 pipe=True,
                 options=ffmpeg_options,
             )
         except Exception:
             self._terminate_ytdlp()
             raise
-
-        process = getattr(self._ffmpeg, "_process", None)
-        if process is None or process.stdin is None:
-            self._terminate_ytdlp()
-            self._ffmpeg.cleanup()
-            raise RuntimeError("FFmpeg did not create an input pipe.")
-        self._pump_thread = threading.Thread(
-            target=self._pump_audio,
-            args=(process.stdin,),
-            name="yt-dlp-to-ffmpeg",
-            daemon=True,
-        )
-        self._pump_thread.start()
-
-    def _pump_audio(self, ffmpeg_stdin: Any) -> None:
-        try:
-            if self._yt_process.stdout is not None:
-                shutil.copyfileobj(self._yt_process.stdout, ffmpeg_stdin, length=64 * 1024)
-                ffmpeg_stdin.flush()
-        except (BrokenPipeError, OSError):
-            pass
-        finally:
-            try:
-                ffmpeg_stdin.close()
-            except OSError:
-                pass
 
     def _terminate_ytdlp(self) -> None:
         if self._yt_process.poll() is None:
@@ -195,8 +170,6 @@ class YtDlpPipeAudio(discord.AudioSource):
     def cleanup(self) -> None:
         self._terminate_ytdlp()
         self._ffmpeg.cleanup()
-        if self._pump_thread.is_alive():
-            self._pump_thread.join(timeout=0.5)
 
 
 class MusicPlayer:
