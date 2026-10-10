@@ -54,7 +54,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # 1. إذا كان رابط بث مباشر مباشر (MP3/Stream)
+        # 1. إذا كان رابط بث مباشر
         if search_query.startswith("http") and (
             ".mp3" in search_query or "stream" in search_query
         ):
@@ -67,7 +67,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 data={"title": "بث صوتي مباشر"},
             )
 
-        # 2. جلب رابط الصوت لتجاوز حظر Railway عبر Piped API
+        # 2. فحص الروابط عبر Piped API لتجاوز حظر يوتيوب في Railway
         video_id = None
         if "youtu.be/" in search_query:
             video_id = search_query.split("youtu.be/")[1].split("?")[0]
@@ -92,13 +92,13 @@ class YTDLSource(discord.PCMVolumeTransformer):
             except Exception:
                 pass
 
-        # 3. إذا لم ينجح عبر API يرجع لـ yt-dlp كخيار ثانٍ
+        # 3. استخدام yt-dlp بالطريقة الآمنة كخيار ثانٍ
         if not audio_url:
-            target = (
-                search_query
-                if search_query.startswith("http")
-                : f"scsearch1:{search_query}"
-            )
+            if search_query.startswith("http"):
+                target = search_query
+            else:
+                target = f"scsearch1:{search_query}"
+
             data = await loop.run_in_executor(
                 None, lambda: ytdl.extract_info(target, download=False)
             )
