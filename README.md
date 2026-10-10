@@ -9,7 +9,7 @@
 3. عيّن المتغير DISCORD_TOKEN إلى رمز البوت. لا تضع الرمز في GitHub.
 4. شغّل:
    - محليًا: python bot.py
-   - على Railway: انشر المستودع باستخدام Dockerfile.
+   - على Railway: انشر المستودع باستخدام Dockerfile، وأضف Volume إلى `/app/database` ثم اضبط `DATABASE_PATH=/app/database/music.db` للحفاظ على إعدادات الخوادم بعد إعادة النشر.
 
 يحتاج البوت في Discord إلى View Channels وSend Messages وEmbed Links وRead Message History وConnect وSpeak. يحتاج أمر تنظيف إلى Manage Messages على البوت، وإلى صلاحية Manage Messages للمستخدم الذي ينفذه.
 
