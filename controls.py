@@ -128,6 +128,9 @@ async def play_query(ctx: commands.Context, query: str | None) -> None:
         return
 
     player = await load_player(ctx.guild.id, ctx.channel)
+    if len(player.queue) >= Config.MAX_QUEUE:
+        await ctx.reply("قائمة الانتظار ممتلئة. ابدأ تشغيلها أو أفرغ جزءًا منها أولًا.", mention_author=False)
+        return
     if not query:
         if player.current:
             await ensure_panel(player, ctx.channel)
@@ -152,8 +155,8 @@ async def play_query(ctx: commands.Context, query: str | None) -> None:
 
     if music_search._is_url(query):
         song = songs[0]
-        await player.enqueue(song, voice_state.channel)
         await ensure_panel(player, ctx.channel)
+        await player.enqueue(song, voice_state.channel)
         notice = await ctx.reply(
             f"➕ أُضيفت **{discord.utils.escape_markdown(song.title)}** إلى المشغّل.",
             mention_author=False,
@@ -196,9 +199,12 @@ async def add_selected_song(
         return
 
     player = await load_player(guild.id, interaction.channel)
+    if len(player.queue) >= Config.MAX_QUEUE:
+        await interaction.followup.send("قائمة الانتظار ممتلئة حاليًا.", ephemeral=True)
+        return
     song.requester = interaction.user.id
-    await player.enqueue(song, voice_state.channel)
     await ensure_panel(player, interaction.channel)
+    await player.enqueue(song, voice_state.channel)
     await interaction.followup.send(
         f"أُضيفت **{discord.utils.escape_markdown(song.title)}** إلى قائمة التشغيل.",
         ephemeral=True,
