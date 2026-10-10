@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from config import Config
+from effects import EFFECT_NAMES
 from player import MusicPlayer, Song, player_manager
 from search import music_search
 from views import PlayerControls, SearchResultsView
@@ -51,6 +52,7 @@ def player_embed(player: MusicPlayer) -> discord.Embed:
     embed.add_field(name="الحالة", value=state, inline=True)
     embed.add_field(name="الصوت", value=f"{player.volume}%", inline=True)
     embed.add_field(name="Bass Boost", value=f"{player.bass}/10", inline=True)
+    embed.add_field(name="المؤثر", value=EFFECT_NAMES.get(player.effect, "عادي"), inline=True)
     embed.add_field(name="الانتظار", value=f"{len(player.queue)} أغنية", inline=True)
     embed.add_field(name="التكرار", value="مفعّل" if player.repeat else "متوقف", inline=True)
     embed.add_field(name="Autoplay", value="مفعّل" if player.autoplay else "متوقف", inline=True)
