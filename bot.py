@@ -1,5 +1,6 @@
 import asyncio
 import os
+import traceback
 import discord
 from discord.ext import commands
 import imageio_ffmpeg
@@ -13,7 +14,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# خيارات استخراج الصوت المخصصة لشبكات الاستضافة السحابية
+# خيارات استخراج الصوت المحسنة لمنع الحظر
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -56,33 +57,33 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, search_query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
 
-        # إذا أدخل المستخدم رابطاً مباشراً من أي موقع
+        # إعداد البحث المباشر عبر SoundCloud
         if search_query.startswith("http://") or search_query.startswith(
             "https://"
         ):
             query = search_query
         else:
-            # البحث المباشر في Soundcloud مع تحديد البادئة بوضوح
-            query = f"scsearch:{search_query}"
+            query = f"scsearch1:{search_query}"
 
-        # استخراج البيانات بأسلوب لا يعطل البوت في حال تأخر الاستجابة
+        # استخراج البيانات
         data = await loop.run_in_executor(
             None, lambda: ytdl.extract_info(query, download=False)
         )
 
         if not data:
-            raise Exception("لم يتلق البوت أي استجابة من السيرفر الصوتية.")
+            raise RuntimeError("لم يسترجع السيرفر أي بيانات صالحة للبحث.")
 
-        # التثبت من القوائم واستخراج أول عنصر
         if "entries" in data:
             entries = [e for e in data["entries"] if e is not None]
             if not entries:
-                raise Exception("لم يتم العثور على أي مقطع بهذا الاسم.")
+                raise RuntimeError(
+                    f"لم يتم العثور على أية نتائج لـ '{search_query}' في SoundCloud."
+                )
             data = entries[0]
 
         filename = data.get("url")
         if not filename:
-            raise Exception("تعذر الحصول على رابط البث الصوتي المباشر.")
+            raise RuntimeError("تعذر استخراج رابط المقطع المباشر.")
 
         return cls(
             discord.FFmpegPCMAudio(
@@ -99,7 +100,7 @@ async def on_ready():
 
 @bot.command(name="check", aliases=["فحص"])
 async def check(ctx):
-    await ctx.send("✅ النسخة المحدثة من البوت شغالة بنجاح!")
+    await ctx.send("✅ البوت يعمل بنجاح!")
 
 
 @bot.command(name="play", aliases=["p", "شغل", "تشغيل"])
@@ -132,7 +133,12 @@ async def play(ctx, *, search: str):
                 await ctx.send(f"🎵 **جاري التشغيل:** {player.title}")
 
         except Exception as e:
-            await ctx.send(f"⚠️ **حدث خطأ:** `{str(e)}`")
+            # طباعة الخطأ البرمجي الحقيقي والواضح
+            error_details = str(e)
+            print("ERROR TRACEBACK:", traceback.format_exc())
+            await ctx.send(
+                f"⚠️ **تفاصيل الخطأ الدقيقة:**\n```{error_details[:1800]}```"
+            )
 
 
 @bot.command(name="skip", aliases=["تخطي", "سكب"])
@@ -149,7 +155,7 @@ async def stop(ctx):
         queues[guild_id].clear()
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
-        await ctx.send("⏹️ تم إيقاف التشغيل، مسح القائمة ومغادرة الروم.")
+        await ctx.send("⏹️ تم إيقاف التشغيل ومغادرة الروم.")
 
 
 TOKEN = os.getenv("DISCORD_TOKEN")
