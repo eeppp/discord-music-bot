@@ -14,9 +14,11 @@ from controls import (
     play_query,
     queue_embed,
     schedule_cleanup,
+    restore_panels,
 )
 from database import Database
 from player import player_manager
+from permissions import DJ_DENIED_MESSAGE, has_dj_access
 
 load_dotenv()
 
@@ -46,15 +48,25 @@ bot = commands.Bot(
 )
 database = Database(Config.DATABASE)
 _database_ready = False
+_commands_synced = False
 
 
 @bot.event
 async def on_ready() -> None:
-    global _database_ready
+    global _database_ready, _commands_synced
     if not _database_ready:
         await database.initialize()
         player_manager.configure(bot, database)
+        await restore_panels(bot)
         _database_ready = True
+
+    if not _commands_synced:
+        try:
+            await bot.tree.sync()
+            _commands_synced = True
+            logger.info("Synced slash commands.")
+        except discord.HTTPException:
+            logger.exception("Could not sync slash commands.")
 
     logger.info("Logged in as %s (%s)", bot.user, bot.user.id if bot.user else "unknown")
     activity = discord.Activity(
@@ -97,17 +109,26 @@ async def _voice_player(ctx: commands.Context):
     return player
 
 
-@bot.command(name="شغل", aliases=["play", "تشغيل"])
+async def _require_dj(ctx: commands.Context, player) -> bool:
+    if has_dj_access(ctx.author, player.dj_role):
+        return True
+    await _send_status(ctx, DJ_DENIED_MESSAGE)
+    return False
+
+
+@bot.hybrid_command(name="شغل", aliases=["play", "تشغيل"])
 @commands.guild_only()
 async def play_command(ctx: commands.Context, *, query: str | None = None) -> None:
     await play_query(ctx, query)
 
 
-@bot.command(name="صوت", aliases=["volume", "vol"])
+@bot.hybrid_command(name="صوت", aliases=["volume", "vol"])
 @commands.guild_only()
 async def volume_command(ctx: commands.Context, volume: int | None = None) -> None:
     player = await _voice_player(ctx)
     if not player:
+        return
+    if not await _require_dj(ctx, player):
         return
     if volume is None:
         await ensure_panel(player, ctx.channel)
@@ -122,11 +143,13 @@ async def volume_command(ctx: commands.Context, volume: int | None = None) -> No
     await _send_status(ctx, f"🔊 مستوى الصوت الآن {player.volume}%.")
 
 
-@bot.command(name="تخطي", aliases=["skip", "التالي"])
+@bot.hybrid_command(name="تخطي", aliases=["skip", "التالي"])
 @commands.guild_only()
 async def skip_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
+        return
+    if not await _require_dj(ctx, player):
         return
     if not player.current:
         await _send_status(ctx, "لا توجد أغنية لتخطيها.")
@@ -135,11 +158,13 @@ async def skip_command(ctx: commands.Context) -> None:
     await _send_status(ctx, "⏭️ تم تخطي الأغنية.")
 
 
-@bot.command(name="تكرار", aliases=["repeat", "كرر"])
+@bot.hybrid_command(name="تكرار", aliases=["repeat", "كرر"])
 @commands.guild_only()
 async def repeat_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
+        return
+    if not await _require_dj(ctx, player):
         return
     player.repeat = not player.repeat
     await player.save_settings()
@@ -148,11 +173,13 @@ async def repeat_command(ctx: commands.Context) -> None:
     await _send_status(ctx, f"🔁 التكرار {status}.")
 
 
-@bot.command(name="خلط", aliases=["shuffle"])
+@bot.hybrid_command(name="خلط", aliases=["shuffle"])
 @commands.guild_only()
 async def shuffle_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
+        return
+    if not await _require_dj(ctx, player):
         return
     if len(player.queue) < 2:
         await _send_status(ctx, "أضف أغنيتين على الأقل قبل خلط الانتظار.")
@@ -163,7 +190,7 @@ async def shuffle_command(ctx: commands.Context) -> None:
     await _send_status(ctx, "🔀 تم خلط قائمة الانتظار.")
 
 
-@bot.command(name="قائمة", aliases=["queue", "انتظار"])
+@bot.hybrid_command(name="قائمة", aliases=["queue", "انتظار"])
 @commands.guild_only()
 async def queue_command(ctx: commands.Context) -> None:
     player = await load_player(ctx.guild.id, ctx.channel)
@@ -171,22 +198,25 @@ async def queue_command(ctx: commands.Context) -> None:
     schedule_cleanup(message)
 
 
-@bot.command(name="إيقاف", aliases=["stop", "اطفاء", "إطفاء"])
+@bot.hybrid_command(name="إيقاف", aliases=["stop", "اطفاء", "إطفاء"])
 @commands.guild_only()
 async def stop_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
         return
+    if not await _require_dj(ctx, player):
+        return
     await player.stop(disconnect=True)
-    player_manager.remove(ctx.guild.id)
     await _send_status(ctx, "⏹️ توقف البوت ومسح قائمة الانتظار.")
 
 
-@bot.command(name="وقف", aliases=["pause", "مؤقت"])
+@bot.hybrid_command(name="وقف", aliases=["pause", "مؤقت"])
 @commands.guild_only()
 async def pause_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
+        return
+    if not await _require_dj(ctx, player):
         return
     if await player.pause():
         await _send_status(ctx, "⏸️ تم إيقاف التشغيل مؤقتًا.")
@@ -196,11 +226,13 @@ async def pause_command(ctx: commands.Context) -> None:
         await _send_status(ctx, "لا توجد أغنية تعمل الآن.")
 
 
-@bot.command(name="كمل", aliases=["resume", "استئناف"])
+@bot.hybrid_command(name="كمل", aliases=["resume", "استئناف"])
 @commands.guild_only()
 async def resume_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
+        return
+    if not await _require_dj(ctx, player):
         return
     if await player.resume():
         await _send_status(ctx, "▶️ استؤنف التشغيل.")
@@ -208,11 +240,13 @@ async def resume_command(ctx: commands.Context) -> None:
         await _send_status(ctx, "التشغيل ليس متوقفًا مؤقتًا.")
 
 
-@bot.command(name="باس", aliases=["bass", "bassboost"])
+@bot.hybrid_command(name="باس", aliases=["bass", "bassboost"])
 @commands.guild_only()
 async def bass_command(ctx: commands.Context, level: int | None = None) -> None:
     player = await _voice_player(ctx)
     if not player:
+        return
+    if not await _require_dj(ctx, player):
         return
     if level is None:
         await ensure_panel(player, ctx.channel)
@@ -227,11 +261,13 @@ async def bass_command(ctx: commands.Context, level: int | None = None) -> None:
     await _send_status(ctx, f"🎚️ Bass Boost مضبوط على {player.bass}/10، ويطبّق على الأغنية التالية.")
 
 
-@bot.command(name="تلقائي", aliases=["autoplay", "راديو"])
+@bot.hybrid_command(name="تلقائي", aliases=["autoplay", "راديو"])
 @commands.guild_only()
 async def autoplay_command(ctx: commands.Context, mode: str | None = None) -> None:
     player = await _voice_player(ctx)
     if not player:
+        return
+    if not await _require_dj(ctx, player):
         return
     if mode and mode.lower() in {"on", "تشغيل", "تفعيل", "نعم"}:
         player.autoplay = True
@@ -245,7 +281,7 @@ async def autoplay_command(ctx: commands.Context, mode: str | None = None) -> No
     await _send_status(ctx, f"📻 التشغيل التلقائي {status}.")
 
 
-@bot.command(name="تنظيف", aliases=["clean", "clear"])
+@bot.hybrid_command(name="تنظيف", aliases=["clean", "clear"])
 @commands.guild_only()
 @commands.has_permissions(manage_messages=True)
 @commands.bot_has_permissions(manage_messages=True)
@@ -266,7 +302,23 @@ async def clean_command(ctx: commands.Context, limit: int = 100) -> None:
     schedule_cleanup(status, 8)
 
 
-@bot.command(name="مساعدة", aliases=["help", "أوامر"])
+@bot.hybrid_command(name="تعيين-دي-جي", description="تعيين دور DJ أو الرجوع إلى الدور الافتراضي")
+@commands.guild_only()
+@commands.has_guild_permissions(manage_guild=True)
+async def set_dj_role_command(
+    ctx: commands.Context,
+    role: discord.Role | None = None,
+) -> None:
+    player = await load_player(ctx.guild.id, ctx.channel)
+    player.dj_role = str(role.id) if role else Config.DJ_ROLE
+    await player.save_settings()
+    if role:
+        await _send_status(ctx, f"🎧 تم تعيين {role.mention} كدور DJ.")
+    else:
+        await _send_status(ctx, f"🎧 عاد دور DJ إلى الإعداد الافتراضي: {Config.DJ_ROLE}.")
+
+
+@bot.hybrid_command(name="مساعدة", aliases=["help", "أوامر"])
 @commands.guild_only()
 async def help_command(ctx: commands.Context) -> None:
     prefix = Config.PREFIX
@@ -284,7 +336,10 @@ async def help_command(ctx: commands.Context) -> None:
             f"{prefix}باس 0-10 — ضبط تعزيز الجهير\n"
             f"{prefix}تلقائي — تشغيل/إيقاف Autoplay\n"
             f"{prefix}إيقاف — إيقاف البوت ومسح الانتظار\n"
-            f"{prefix}تنظيف — حذف رسائل البوت القديمة"
+            f"{prefix}تأثير — افتح قائمة المؤثرات من لوحة المشغّل\n"
+            f"{prefix}تعيين-دي-جي @دور — تعيين دور DJ (لإدارة الخادم)\n"
+            f"{prefix}تنظيف — حذف رسائل البوت القديمة\n"
+            "الأوامر تظهر أيضًا كأوامر Slash بعد مزامنتها."
         ),
         color=Config.EMBED_COLOR,
     )
@@ -292,9 +347,28 @@ async def help_command(ctx: commands.Context) -> None:
     schedule_cleanup(message, 60)
 
 
-@bot.command(name="فحص", aliases=["check", "ping"])
+@bot.hybrid_command(name="فحص", aliases=["check", "ping"])
 async def check_command(ctx: commands.Context) -> None:
     await _send_status(ctx, f"✅ Music S3YD يعمل · {round(bot.latency * 1000)} ms")
+
+
+@bot.tree.error
+async def on_app_command_error(
+    interaction: discord.Interaction,
+    error: discord.app_commands.AppCommandError,
+) -> None:
+    if isinstance(error, discord.app_commands.CheckFailure):
+        message = "لا تملك الصلاحية المطلوبة لاستخدام هذا الأمر."
+    else:
+        logger.error("Slash command error: %s", error)
+        message = "حدث خطأ أثناء تنفيذ الأمر."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.HTTPException:
+        logger.debug("Could not report a slash command error.", exc_info=True)
 
 
 @bot.event
