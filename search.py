@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import yt_dlp
 
-from player import Song
+from player import Song, _get_youtube_cookie_file
 
 logger = logging.getLogger("MusicS3YD.search")
 
@@ -36,6 +36,14 @@ class MusicSearch:
             "ignoreerrors": True,
             "default_search": "ytsearch",
         }
+        if prefix == "ytsearch":
+            try:
+                cookie_file = _get_youtube_cookie_file()
+            except ValueError as exc:
+                logger.warning("YouTube cookies unavailable, continuing without them: %s", exc)
+                cookie_file = None
+            if cookie_file:
+                options["cookiefile"] = cookie_file
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(f"{prefix}{limit}:{query}", download=False)
@@ -85,6 +93,15 @@ class MusicSearch:
             "skip_download": True,
             "noplaylist": True,
         }
+        host = (urlparse(url).hostname or "").lower()
+        if host == "youtu.be" or host.endswith("youtube.com"):
+            try:
+                cookie_file = _get_youtube_cookie_file()
+            except ValueError as exc:
+                logger.warning("YouTube cookies unavailable, continuing without them: %s", exc)
+                cookie_file = None
+            if cookie_file:
+                options["cookiefile"] = cookie_file
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
