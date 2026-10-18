@@ -231,6 +231,7 @@ class MusicPlayer:
         self.control_view: discord.ui.View | None = None
         self.text_channel: discord.abc.Messageable | None = None
         self._advance_lock = asyncio.Lock()
+        self._connect_lock = asyncio.Lock()
         self._effect_update_lock = asyncio.Lock()
         self._playback_generation = 0
         self._track_offset = 0.0
@@ -270,14 +271,31 @@ class MusicPlayer:
 
     async def connect(self, channel: discord.abc.GuildChannel) -> discord.VoiceClient:
         guild = channel.guild
-        voice = guild.voice_client
-        if voice and voice.is_connected():
-            if voice.channel != channel:
-                await voice.move_to(channel)
-        else:
-            voice = await channel.connect()
-        self.voice = voice
-        return voice
+        async with self._connect_lock:
+            voice = self.voice
+            if not voice or not voice.is_connected() or voice.guild.id != guild.id:
+                voice = guild.voice_client
+
+            if not voice:
+                voice = next(
+                    (
+                        client
+                        for client in self.bot.voice_clients
+                        if client.guild.id == guild.id
+                    ),
+                    None,
+                )
+
+            if voice and voice.is_connected():
+                if voice.channel != channel:
+                    await voice.move_to(channel)
+            else:
+                if voice:
+                    await voice.disconnect(force=True)
+                voice = await channel.connect()
+
+            self.voice = voice
+            return voice
 
     async def enqueue(self, song: Song, channel: discord.abc.GuildChannel | None = None) -> None:
         if channel is not None:
