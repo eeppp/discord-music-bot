@@ -19,7 +19,6 @@ from controls import (
 from database import Database
 from effects import EFFECT_NAMES, VALID_EFFECTS, normalize_effect
 from player import player_manager
-from permissions import DJ_DENIED_MESSAGE, has_dj_access
 
 load_dotenv()
 
@@ -109,13 +108,6 @@ async def _voice_player(ctx: commands.Context):
     return player
 
 
-async def _require_dj(ctx: commands.Context, player) -> bool:
-    if has_dj_access(ctx.author, player.dj_role):
-        return True
-    await _send_status(ctx, DJ_DENIED_MESSAGE)
-    return False
-
-
 @bot.hybrid_command(name="شغل", aliases=["play", "تشغيل"])
 @commands.guild_only()
 async def play_command(ctx: commands.Context, *, query: str | None = None) -> None:
@@ -127,8 +119,6 @@ async def play_command(ctx: commands.Context, *, query: str | None = None) -> No
 async def volume_command(ctx: commands.Context, volume: int | None = None) -> None:
     player = await _voice_player(ctx)
     if not player:
-        return
-    if not await _require_dj(ctx, player):
         return
     if volume is None:
         await ensure_panel(player, ctx.channel)
@@ -149,8 +139,6 @@ async def skip_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
         return
-    if not await _require_dj(ctx, player):
-        return
     if not player.current:
         await _send_status(ctx, "لا توجد أغنية لتخطيها.")
         return
@@ -164,8 +152,6 @@ async def repeat_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
         return
-    if not await _require_dj(ctx, player):
-        return
     player.repeat = not player.repeat
     await player.save_settings()
     await ensure_panel(player, ctx.channel)
@@ -178,8 +164,6 @@ async def repeat_command(ctx: commands.Context) -> None:
 async def shuffle_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
-        return
-    if not await _require_dj(ctx, player):
         return
     if len(player.queue) < 2:
         await _send_status(ctx, "أضف أغنيتين على الأقل قبل خلط الانتظار.")
@@ -204,8 +188,6 @@ async def stop_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
         return
-    if not await _require_dj(ctx, player):
-        return
     await player.stop(disconnect=True)
     await _send_status(ctx, "⏹️ توقف البوت ومسح قائمة الانتظار.")
 
@@ -215,8 +197,6 @@ async def stop_command(ctx: commands.Context) -> None:
 async def pause_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
-        return
-    if not await _require_dj(ctx, player):
         return
     if await player.pause():
         await _send_status(ctx, "⏸️ تم إيقاف التشغيل مؤقتًا.")
@@ -232,8 +212,6 @@ async def resume_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
         return
-    if not await _require_dj(ctx, player):
-        return
     if await player.resume():
         await _send_status(ctx, "▶️ استؤنف التشغيل.")
     else:
@@ -245,8 +223,6 @@ async def resume_command(ctx: commands.Context) -> None:
 async def bass_command(ctx: commands.Context, level: int | None = None) -> None:
     player = await _voice_player(ctx)
     if not player:
-        return
-    if not await _require_dj(ctx, player):
         return
     if level is None:
         await ensure_panel(player, ctx.channel)
@@ -279,8 +255,6 @@ async def effect_command(
     player = await _voice_player(ctx)
     if not player:
         return
-    if not await _require_dj(ctx, player):
-        return
     if not effect:
         await ensure_panel(player, ctx.channel)
         await _send_status(ctx, "اختر المؤثر من قائمة 🎛️ في لوحة المشغّل.")
@@ -312,8 +286,6 @@ async def effect_command(
 async def autoplay_command(ctx: commands.Context, mode: str | None = None) -> None:
     player = await _voice_player(ctx)
     if not player:
-        return
-    if not await _require_dj(ctx, player):
         return
     if mode and mode.lower() in {"on", "تشغيل", "تفعيل", "نعم"}:
         player.autoplay = True
@@ -349,22 +321,6 @@ async def clean_command(ctx: commands.Context, limit: int = 100) -> None:
     schedule_cleanup(status, 8)
 
 
-@bot.hybrid_command(name="تعيين-دي-جي", description="تعيين دور DJ أو الرجوع إلى الدور الافتراضي")
-@commands.guild_only()
-@commands.has_guild_permissions(manage_guild=True)
-async def set_dj_role_command(
-    ctx: commands.Context,
-    role: discord.Role | None = None,
-) -> None:
-    player = await load_player(ctx.guild.id, ctx.channel)
-    player.dj_role = str(role.id) if role else Config.DJ_ROLE
-    await player.save_settings()
-    if role:
-        await _send_status(ctx, f"🎧 تم تعيين {role.mention} كدور DJ.")
-    else:
-        await _send_status(ctx, f"🎧 عاد دور DJ إلى الإعداد الافتراضي: {Config.DJ_ROLE}.")
-
-
 @bot.hybrid_command(name="مساعدة", aliases=["help", "أوامر"])
 @commands.guild_only()
 async def help_command(ctx: commands.Context) -> None:
@@ -385,7 +341,6 @@ async def help_command(ctx: commands.Context) -> None:
             f"{prefix}تلقائي — تشغيل/إيقاف Autoplay\n"
             f"{prefix}إيقاف — إيقاف البوت ومسح الانتظار\n"
             f"{prefix}تأثير — افتح قائمة المؤثرات من لوحة المشغّل\n"
-            f"{prefix}تعيين-دي-جي @دور — تعيين دور DJ (لإدارة الخادم)\n"
             f"{prefix}تنظيف — حذف رسائل البوت القديمة\n"
             "الأوامر تظهر أيضًا كأوامر Slash بعد مزامنتها."
         ),
@@ -424,10 +379,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
     if isinstance(error, commands.CommandNotFound):
         return
     if isinstance(error, commands.MissingPermissions):
-        if "manage_guild" in error.missing_permissions:
-            message = "تحتاج صلاحية إدارة الخادم لتعيين دور DJ."
-        else:
-            message = "تحتاج صلاحية إدارة الرسائل لاستخدام هذا الأمر."
+        message = "تحتاج صلاحية إدارة الرسائل لاستخدام هذا الأمر."
         await _send_status(ctx, message)
         return
     if isinstance(error, commands.BotMissingPermissions):
