@@ -16,6 +16,7 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 class Config:
     TOKEN = os.getenv("DISCORD_TOKEN")
     PREFIX = os.getenv("BOT_PREFIX", "!")
+    MUSIC_COMMAND_CHANNEL_ID = os.getenv("MUSIC_COMMAND_CHANNEL_ID", "").strip()
     EMBED_COLOR = int(os.getenv("EMBED_COLOR", "0x7C3AED"), 0)
     DEFAULT_VOLUME = _env_int("DEFAULT_VOLUME", 80, 0, 200)
     MAX_QUEUE = _env_int("MAX_QUEUE", 100, 1, 500)

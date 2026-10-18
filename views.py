@@ -1,9 +1,53 @@
 from __future__ import annotations
 
+import re
+
 import discord
 
 from config import Config
 from player import MusicPlayer, Song
+
+
+def is_music_commands_channel(channel: object) -> bool:
+    """Limit the help panel to the configured channel, or its known names."""
+    configured_id = Config.MUSIC_COMMAND_CHANNEL_ID
+    if configured_id:
+        return str(getattr(channel, "id", "")) == configured_id
+    name = re.sub(r"[\W_]+", "", str(getattr(channel, "name", "")).casefold())
+    return name in {"اوامرميوزك", "اوامرالميوزك", "musiccommands", "musiccommand"}
+
+
+COMMANDS_COPY_TEXT = """{prefix}شغل اسم الأغنية أو الرابط — بحث وتشغيل
+{prefix}ص 0-200 — ضبط الصوت بسرعة
+{prefix}صوت 0-200 — ضبط الصوت
+{prefix}تخطي — تخطي الأغنية الحالية
+{prefix}تكرار — تشغيل أو إيقاف التكرار
+{prefix}خلط — خلط قائمة الانتظار
+{prefix}قائمة — عرض قائمة الانتظار
+{prefix}وقف — إيقاف مؤقت أو استئناف
+{prefix}كمل — استئناف التشغيل
+{prefix}باس 0-10 — ضبط تعزيز الجهير
+{prefix}تلقائي — تشغيل أو إيقاف التشغيل التلقائي
+{prefix}إيقاف — إيقاف البوت ومسح الانتظار
+{prefix}تأثير — اختيار مؤثر من لوحة المشغّل
+{prefix}مساعدة — عرض هذه الرسالة"""
+
+
+class MusicCommandsView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="نسخ الأوامر", emoji="📋", style=discord.ButtonStyle.primary)
+    async def copy_commands(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not is_music_commands_channel(interaction.channel):
+            await interaction.response.send_message(
+                "هذا الزر يعمل فقط داخل روم أوامر الموسيقى.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            f"```text\n{COMMANDS_COPY_TEXT.format(prefix=Config.PREFIX)}\n```",
+            ephemeral=True,
+        )
 
 
 def _duration(seconds: int) -> str:
