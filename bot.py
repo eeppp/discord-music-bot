@@ -19,6 +19,7 @@ from controls import (
 from database import Database
 from effects import EFFECT_NAMES, VALID_EFFECTS, normalize_effect
 from player import player_manager
+from views import MusicCommandsView, is_music_commands_channel
 
 load_dotenv()
 
@@ -324,6 +325,9 @@ async def clean_command(ctx: commands.Context, limit: int = 100) -> None:
 @bot.hybrid_command(name="مساعدة", aliases=["help", "أوامر"])
 @commands.guild_only()
 async def help_command(ctx: commands.Context) -> None:
+    if not is_music_commands_channel(ctx.channel):
+        await _send_status(ctx, "استخدم أمر المساعدة داخل روم أوامر الموسيقى فقط.")
+        return
     prefix = Config.PREFIX
     embed = discord.Embed(
         title="🎵 أوامر Music S3YD",
@@ -346,7 +350,7 @@ async def help_command(ctx: commands.Context) -> None:
         ),
         color=Config.EMBED_COLOR,
     )
-    message = await ctx.send(embed=embed)
+    message = await ctx.send(embed=embed, view=MusicCommandsView())
     schedule_cleanup(message, 60)
 
 
