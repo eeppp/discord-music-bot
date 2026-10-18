@@ -14,7 +14,13 @@ def is_music_commands_channel(channel: object) -> bool:
     if configured_id:
         return str(getattr(channel, "id", "")) == configured_id
     name = re.sub(r"[\W_]+", "", str(getattr(channel, "name", "")).casefold())
-    return name in {"اوامرميوزك", "اوامرالميوزك", "musiccommands", "musiccommand"}
+    return name in {
+        "اوامرميوزك",
+        "اوامرالميوزك",
+        "اوامرمusic",
+        "musiccommands",
+        "musiccommand",
+    }
 
 
 COMMANDS_COPY_TEXT = """{prefix}شغل اسم الأغنية أو الرابط — بحث وتشغيل
@@ -35,9 +41,14 @@ COMMANDS_COPY_TEXT = """{prefix}شغل اسم الأغنية أو الرابط �
 
 class MusicCommandsView(discord.ui.View):
     def __init__(self) -> None:
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
 
-    @discord.ui.button(label="نسخ الأوامر", emoji="📋", style=discord.ButtonStyle.primary)
+    @discord.ui.button(
+        label="نسخ الأوامر",
+        emoji="📋",
+        style=discord.ButtonStyle.primary,
+        custom_id="music:copy_commands",
+    )
     async def copy_commands(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not is_music_commands_channel(interaction.channel):
             await interaction.response.send_message(
@@ -48,6 +59,31 @@ class MusicCommandsView(discord.ui.View):
             f"```text\n{COMMANDS_COPY_TEXT.format(prefix=Config.PREFIX)}\n```",
             ephemeral=True,
         )
+
+
+def music_commands_embed() -> discord.Embed:
+    prefix = Config.PREFIX
+    return discord.Embed(
+        title="🎵 أوامر Music S3YD",
+        description=(
+            f"{prefix}شغل اسم الأغنية أو الرابط — بحث وتشغيل YouTube/SoundCloud\n"
+            f"{prefix}ص 0-200 — ضبط الصوت بسرعة\n"
+            f"{prefix}صوت 0-200 — ضبط الصوت\n"
+            f"{prefix}تخطي — تخطي الأغنية الحالية\n"
+            f"{prefix}تكرار — تشغيل/إيقاف تكرار الأغنية الحالية\n"
+            f"{prefix}خلط — خلط قائمة الانتظار\n"
+            f"{prefix}قائمة — عرض قائمة الانتظار\n"
+            f"{prefix}وقف — إيقاف مؤقت أو استئناف\n"
+            f"{prefix}كمل — استئناف التشغيل\n"
+            f"{prefix}باس 0-10 — ضبط تعزيز الجهير\n"
+            f"{prefix}تلقائي — تشغيل/إيقاف Autoplay\n"
+            f"{prefix}إيقاف — إيقاف البوت ومسح الانتظار\n"
+            f"{prefix}تأثير — اختيار مؤثر من لوحة المشغّل\n"
+            f"{prefix}مساعدة — عرض هذه القائمة\n\n"
+            "اضغط زر **نسخ الأوامر** لعرض القائمة في رسالة خاصة قابلة للنسخ."
+        ),
+        color=Config.EMBED_COLOR,
+    )
 
 
 def _duration(seconds: int) -> str:
