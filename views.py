@@ -14,13 +14,14 @@ def is_music_commands_channel(channel: object) -> bool:
     if configured_id:
         return str(getattr(channel, "id", "")) == configured_id
     name = re.sub(r"[\W_]+", "", str(getattr(channel, "name", "")).casefold())
+    name = name.translate(str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا"}))
     return name in {
         "اوامرميوزك",
         "اوامرالميوزك",
         "اوامرمusic",
         "musiccommands",
         "musiccommand",
-    }
+    } or ("اوامر" in name and "music" in name)
 
 
 COMMANDS_COPY_TEXT = """{prefix}شغل اسم الأغنية أو الرابط — بحث وتشغيل

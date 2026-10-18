@@ -72,7 +72,16 @@ async def _publish_music_commands_panel() -> None:
             )
 
         if not isinstance(channel, discord.TextChannel):
-            logger.info("Music commands channel not found in guild %s.", guild.id)
+            possible_channels = [
+                item.name
+                for item in guild.text_channels
+                if "music" in item.name.casefold() or "اوامر" in item.name
+            ]
+            logger.info(
+                "Music commands channel not found in guild %s. Matching visible channel names: %s",
+                guild.id,
+                possible_channels,
+            )
             continue
 
         try:
