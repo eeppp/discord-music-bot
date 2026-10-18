@@ -19,7 +19,7 @@ from controls import (
 from database import Database
 from effects import EFFECT_NAMES, VALID_EFFECTS, normalize_effect
 from player import player_manager
-from views import MusicCommandsView, is_music_commands_channel
+from views import MusicCommandsView, is_music_commands_channel, music_commands_embed
 
 load_dotenv()
 
@@ -50,11 +50,56 @@ bot = commands.Bot(
 database = Database(Config.DATABASE)
 _database_ready = False
 _commands_synced = False
+_commands_panel_published = False
+
+
+async def _publish_music_commands_panel() -> None:
+    if bot.user is None:
+        return
+
+    for guild in bot.guilds:
+        channel = None
+        if Config.MUSIC_COMMAND_CHANNEL_ID:
+            try:
+                channel = guild.get_channel(int(Config.MUSIC_COMMAND_CHANNEL_ID))
+            except ValueError:
+                logger.error("MUSIC_COMMAND_CHANNEL_ID must be a channel ID.")
+                return
+        else:
+            channel = next(
+                (item for item in guild.text_channels if is_music_commands_channel(item)),
+                None,
+            )
+
+        if not isinstance(channel, discord.TextChannel):
+            logger.info("Music commands channel not found in guild %s.", guild.id)
+            continue
+
+        try:
+            async for message in channel.history(limit=50):
+                if (
+                    message.author.id == bot.user.id
+                    and any(embed.title == "🎵 أوامر Music S3YD" for embed in message.embeds)
+                ):
+                    await message.edit(embed=music_commands_embed(), view=MusicCommandsView())
+                    logger.info("Updated music commands panel in channel %s.", channel.id)
+                    break
+            else:
+                await channel.send(embed=music_commands_embed(), view=MusicCommandsView())
+                logger.info("Published music commands panel in channel %s.", channel.id)
+        except discord.Forbidden:
+            logger.warning("Cannot publish music commands panel in channel %s.", channel.id)
+        except discord.HTTPException:
+            logger.exception("Could not publish music commands panel in channel %s.", channel.id)
 
 
 @bot.event
 async def on_ready() -> None:
-    global _database_ready, _commands_synced
+    global _database_ready, _commands_synced, _commands_panel_published
+    if not _commands_panel_published:
+        _commands_panel_published = True
+        bot.add_view(MusicCommandsView())
+        await _publish_music_commands_panel()
     if not _database_ready:
         await database.initialize()
         player_manager.configure(bot, database)
@@ -328,30 +373,7 @@ async def help_command(ctx: commands.Context) -> None:
     if not is_music_commands_channel(ctx.channel):
         await _send_status(ctx, "استخدم أمر المساعدة داخل روم أوامر الموسيقى فقط.")
         return
-    prefix = Config.PREFIX
-    embed = discord.Embed(
-        title="🎵 أوامر Music S3YD",
-        description=(
-            f"{prefix}شغل اسم الأغنية أو الرابط — بحث وتشغيل YouTube/SoundCloud\n"
-            f"{prefix}ص 0-200 — ضبط الصوت بسرعة (مثال: {prefix}ص 5)\n"
-            f"{prefix}صوت 0-200 — ضبط الصوت\n"
-            f"{prefix}تخطي — تخطي الأغنية الحالية\n"
-            f"{prefix}تكرار — تشغيل/إيقاف تكرار الأغنية الحالية\n"
-            f"{prefix}خلط — خلط قائمة الانتظار\n"
-            f"{prefix}قائمة — عرض قائمة الانتظار\n"
-            f"{prefix}وقف — إيقاف مؤقت أو استئناف\n"
-            f"{prefix}كمل — استئناف التشغيل\n"
-            f"{prefix}باس 0-10 — ضبط تعزيز الجهير\n"
-            f"{prefix}تلقائي — تشغيل/إيقاف Autoplay\n"
-            f"{prefix}إيقاف — إيقاف البوت ومسح الانتظار\n"
-            f"{prefix}تأثير — افتح قائمة المؤثرات من لوحة المشغّل\n"
-            f"{prefix}تنظيف — حذف رسائل البوت القديمة\n"
-            "الأوامر تظهر أيضًا كأوامر Slash بعد مزامنتها."
-        ),
-        color=Config.EMBED_COLOR,
-    )
-    message = await ctx.send(embed=embed, view=MusicCommandsView())
-    schedule_cleanup(message, 60)
+    await ctx.send(embed=music_commands_embed(), view=MusicCommandsView())
 
 
 @bot.hybrid_command(name="فحص", aliases=["check", "ping"])
