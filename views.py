@@ -24,64 +24,63 @@ def is_music_commands_channel(channel: object) -> bool:
     } or ("اوامر" in name and "music" in name)
 
 
-COMMANDS_COPY_TEXT = """{prefix}شغل اسم الأغنية أو الرابط — بحث وتشغيل
-{prefix}ص 0-200 — ضبط الصوت بسرعة
-{prefix}صوت 0-200 — ضبط الصوت
-{prefix}تخطي — تخطي الأغنية الحالية
-{prefix}تكرار — تشغيل أو إيقاف التكرار
-{prefix}خلط — خلط قائمة الانتظار
-{prefix}قائمة — عرض قائمة الانتظار
-{prefix}وقف — إيقاف مؤقت أو استئناف
-{prefix}كمل — استئناف التشغيل
-{prefix}باس 0-10 — ضبط تعزيز الجهير
-{prefix}تلقائي — تشغيل أو إيقاف التشغيل التلقائي
-{prefix}إيقاف — إيقاف البوت ومسح الانتظار
-{prefix}تأثير — اختيار مؤثر من لوحة المشغّل
-{prefix}مساعدة — عرض هذه الرسالة"""
+MUSIC_COMMANDS = (
+    ("شغل", "تشغيل أغنية بالاسم أو الرابط", ""),
+    ("ص", "ضبط الصوت بسرعة من 0 إلى 200", " 0-200"),
+    ("صوت", "ضبط مستوى الصوت", " 0-200"),
+    ("تخطي", "تخطي الأغنية الحالية", ""),
+    ("تكرار", "تشغيل أو إيقاف التكرار", ""),
+    ("خلط", "خلط قائمة الانتظار", ""),
+    ("قائمة", "عرض قائمة الانتظار", ""),
+    ("وقف", "إيقاف مؤقت أو استئناف", ""),
+    ("كمل", "استئناف التشغيل", ""),
+    ("باس", "ضبط تعزيز الجهير من 0 إلى 10", " 0-10"),
+    ("تلقائي", "تشغيل أو إيقاف Autoplay", ""),
+    ("إيقاف", "إيقاف البوت ومسح الانتظار", ""),
+    ("تأثير", "اختيار مؤثر من لوحة المشغّل", ""),
+    ("مساعدة", "عرض قائمة الأوامر", ""),
+)
 
 
-class MusicCommandsView(discord.ui.View):
-    def __init__(self) -> None:
-        super().__init__(timeout=None)
+class CommandCopyButton(discord.ui.Button):
+    def __init__(self, command_name: str, usage: str, index: int) -> None:
+        self.command = f"{Config.PREFIX}{command_name}{usage}"
+        super().__init__(
+            label=f"📋 {Config.PREFIX}{command_name}",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"music:copy_command:{index}",
+            row=index // 5,
+        )
 
-    @discord.ui.button(
-        label="نسخ الأوامر",
-        emoji="📋",
-        style=discord.ButtonStyle.primary,
-        custom_id="music:copy_commands",
-    )
-    async def copy_commands(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def callback(self, interaction: discord.Interaction) -> None:
         if not is_music_commands_channel(interaction.channel):
             await interaction.response.send_message(
                 "هذا الزر يعمل فقط داخل روم أوامر الموسيقى.", ephemeral=True
             )
             return
         await interaction.response.send_message(
-            f"```text\n{COMMANDS_COPY_TEXT.format(prefix=Config.PREFIX)}\n```",
-            ephemeral=True,
+            f"`{self.command}`", ephemeral=True
         )
+
+
+class MusicCommandsView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+        for index, (command_name, _, usage) in enumerate(MUSIC_COMMANDS):
+            self.add_item(CommandCopyButton(command_name, usage, index))
 
 
 def music_commands_embed() -> discord.Embed:
     prefix = Config.PREFIX
+    command_lines = "\n".join(
+        f"• `{prefix}{command_name}{usage or (' <اسم الأغنية أو الرابط>' if command_name == 'شغل' else '')}` — {description}"
+        for command_name, description, usage in MUSIC_COMMANDS
+    )
     return discord.Embed(
         title="🎵 أوامر Music S3YD",
         description=(
-            f"{prefix}شغل اسم الأغنية أو الرابط — بحث وتشغيل YouTube/SoundCloud\n"
-            f"{prefix}ص 0-200 — ضبط الصوت بسرعة\n"
-            f"{prefix}صوت 0-200 — ضبط الصوت\n"
-            f"{prefix}تخطي — تخطي الأغنية الحالية\n"
-            f"{prefix}تكرار — تشغيل/إيقاف تكرار الأغنية الحالية\n"
-            f"{prefix}خلط — خلط قائمة الانتظار\n"
-            f"{prefix}قائمة — عرض قائمة الانتظار\n"
-            f"{prefix}وقف — إيقاف مؤقت أو استئناف\n"
-            f"{prefix}كمل — استئناف التشغيل\n"
-            f"{prefix}باس 0-10 — ضبط تعزيز الجهير\n"
-            f"{prefix}تلقائي — تشغيل/إيقاف Autoplay\n"
-            f"{prefix}إيقاف — إيقاف البوت ومسح الانتظار\n"
-            f"{prefix}تأثير — اختيار مؤثر من لوحة المشغّل\n"
-            f"{prefix}مساعدة — عرض هذه القائمة\n\n"
-            "اضغط زر **نسخ الأوامر** لعرض القائمة في رسالة خاصة قابلة للنسخ."
+            "كل أمر في سطر مستقل. اضغط الزر الذي يحمل اسم الأمر ليرسل لك هذا الأمر وحده.\n\n"
+            f"{command_lines}"
         ),
         color=Config.EMBED_COLOR,
     )
