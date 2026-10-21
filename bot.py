@@ -769,9 +769,9 @@ async def on_app_command_error(
         message = "حدث خطأ أثناء تنفيذ الأمر."
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
+            await interaction.followup.send(message, ephemeral=False)
         else:
-            await interaction.response.send_message(message, ephemeral=True)
+            await interaction.response.send_message(message, ephemeral=False)
     except discord.HTTPException:
         logger.debug("Could not report a slash command error.", exc_info=True)
 

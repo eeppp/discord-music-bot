@@ -207,7 +207,7 @@ async def add_selected_song(
     if not guild or not voice_state or not voice_state.channel:
         await interaction.followup.send(
             "ادخل قناة صوتية أولًا ثم اختر الأغنية مجددًا.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -215,18 +215,18 @@ async def add_selected_song(
     if player.voice and player.voice.is_connected() and player.voice.channel != voice_state.channel:
         await interaction.followup.send(
             "انضم إلى قناة البوت نفسها لإضافة أغنية.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     if len(player.queue) >= Config.MAX_QUEUE:
-        await interaction.followup.send("قائمة الانتظار ممتلئة حاليًا.", ephemeral=True)
+        await interaction.followup.send("قائمة الانتظار ممتلئة حاليًا.", ephemeral=False)
         return
     song.requester = interaction.user.id
     await ensure_panel(player, interaction.channel)
     await player.enqueue(song, voice_state.channel)
     await interaction.followup.send(
         f"أُضيفت **{discord.utils.escape_markdown(song.title)}** إلى قائمة التشغيل.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
 

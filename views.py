@@ -59,11 +59,11 @@ class CommandCopyButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         if not is_music_commands_channel(interaction.channel):
             await interaction.response.send_message(
-                "هذا الزر يعمل فقط داخل روم أوامر الموسيقى.", ephemeral=True
+                "هذا الزر يعمل فقط داخل روم أوامر الموسيقى.", ephemeral=False
             )
             return
         await interaction.response.send_message(
-            f"`{self.command}`", ephemeral=True
+            f"`{self.command}`", ephemeral=False
         )
 
 
@@ -138,14 +138,14 @@ class PlayerControls(discord.ui.View):
         if not self.player.voice or not voice or voice.channel != self.player.voice.channel:
             await interaction.response.send_message(
                 "انضم إلى القناة الصوتية نفسها التي يوجد فيها البوت للتحكم بالمشغّل.",
-                ephemeral=True,
+                ephemeral=False,
             )
             return False
         return True
 
     @discord.ui.button(label="إيقاف مؤقت", emoji="⏯️", style=discord.ButtonStyle.primary, custom_id="music:pause", row=0)
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         if self.player.voice and self.player.voice.is_paused():
             changed = await self.player.resume()
             message = "▶️ استؤنف التشغيل." if changed else "لا يوجد تشغيل متوقف مؤقتًا."
@@ -153,52 +153,52 @@ class PlayerControls(discord.ui.View):
             changed = await self.player.pause()
             message = "⏸️ تم إيقاف التشغيل مؤقتًا." if changed else "لا توجد أغنية تعمل الآن."
         await self.player._refresh_panel()
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=False)
 
     @discord.ui.button(label="تخطي", emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="music:skip", row=0)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         await self.player.skip()
-        await interaction.followup.send("تم تخطي الأغنية.", ephemeral=True)
+        await interaction.followup.send("تم تخطي الأغنية.", ephemeral=False)
 
     @discord.ui.button(label="إيقاف", emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="music:stop", row=0)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         await self.player.stop()
-        await interaction.followup.send("توقف التشغيل وتم مسح قائمة الانتظار.", ephemeral=True)
+        await interaction.followup.send("توقف التشغيل وتم مسح قائمة الانتظار.", ephemeral=False)
 
     @discord.ui.button(label="خلط", emoji="🔀", style=discord.ButtonStyle.secondary, custom_id="music:shuffle", row=0)
     async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         self.player.queue.shuffle()
         self.player.shuffle = True
         await self.player._refresh_panel()
-        await interaction.followup.send("تم خلط قائمة الانتظار.", ephemeral=True)
+        await interaction.followup.send("تم خلط قائمة الانتظار.", ephemeral=False)
 
     @discord.ui.button(label="تكرار", emoji="🔁", style=discord.ButtonStyle.secondary, custom_id="music:repeat", row=0)
     async def repeat_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         self.player.repeat = not self.player.repeat
         await self.player.save_settings()
         await self.player._refresh_panel()
         status = "مفعّل" if self.player.repeat else "متوقف"
-        await interaction.followup.send(f"التكرار: {status}.", ephemeral=True)
+        await interaction.followup.send(f"التكرار: {status}.", ephemeral=False)
 
     @discord.ui.button(label="التشغيل التلقائي", emoji="📻", style=discord.ButtonStyle.secondary, custom_id="music:autoplay", row=1)
     async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         self.player.autoplay = not self.player.autoplay
         await self.player.save_settings()
         await self.player._refresh_panel()
         status = "مفعّل" if self.player.autoplay else "متوقف"
-        await interaction.followup.send(f"التشغيل التلقائي: {status}.", ephemeral=True)
+        await interaction.followup.send(f"التشغيل التلقائي: {status}.", ephemeral=False)
 
     @discord.ui.button(label="قائمة الانتظار", emoji="📜", style=discord.ButtonStyle.secondary, custom_id="music:queue", row=1)
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         from controls import queue_embed
 
         await interaction.response.send_message(
-            embed=queue_embed(self.player), ephemeral=True
+            embed=queue_embed(self.player), ephemeral=False
         )
 
 
@@ -222,12 +222,12 @@ class VolumeSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view or not await self.view.interaction_check(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         self.player.set_volume(int(self.values[0]))
         await self.player.save_settings()
         await self.player._refresh_panel()
         await interaction.followup.send(
-            f"تم ضبط الصوت على {self.player.volume}%.", ephemeral=True
+            f"تم ضبط الصوت على {self.player.volume}%.", ephemeral=False
         )
 
 
@@ -250,7 +250,7 @@ class BassSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view or not await self.view.interaction_check(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         self.player.set_bass(int(self.values[0]))
         await self.player.save_settings()
         applied = await self.player.apply_effects_to_current()
@@ -262,7 +262,7 @@ class BassSelect(discord.ui.Select):
         )
         await interaction.followup.send(
             f"تم ضبط Bass Boost على {self.player.bass}/10، {effect_status}",
-            ephemeral=True,
+            ephemeral=False,
         )
 
 
@@ -288,7 +288,7 @@ class EffectSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view or not await self.view.interaction_check(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         self.player.set_effect(self.values[0])
         await self.player.save_settings()
         applied = await self.player.apply_effects_to_current()
@@ -300,7 +300,7 @@ class EffectSelect(discord.ui.Select):
         )
         await interaction.followup.send(
             f"تم اختيار المؤثر {effect_status}",
-            ephemeral=True,
+            ephemeral=False,
         )
 
 
@@ -331,11 +331,11 @@ class SongSelect(discord.ui.Select):
             return
         if interaction.user.id != view.requester_id:
             await interaction.response.send_message(
-                "هذه النتائج تخص الشخص الذي بدأ البحث.", ephemeral=True
+                "هذه النتائج تخص الشخص الذي بدأ البحث.", ephemeral=False
             )
             return
         song = self.songs[int(self.values[0])]
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         from controls import add_selected_song
 
         await add_selected_song(interaction, song)
