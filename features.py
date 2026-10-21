@@ -42,6 +42,11 @@ class FeatureStore:
                     sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY(guild_id, version)
                 );
+                CREATE TABLE IF NOT EXISTS voice_stay(
+                    guild_id INTEGER PRIMARY KEY,
+                    channel_id INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
             try:
@@ -49,6 +54,26 @@ class FeatureStore:
             except aiosqlite.OperationalError as exc:
                 if "duplicate column" not in str(exc).lower():
                     raise
+            await db.commit()
+
+    async def set_voice_stay(self, guild_id: int, channel_id: int) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO voice_stay(guild_id,channel_id) VALUES(?,?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id, updated_at=CURRENT_TIMESTAMP",
+                (guild_id, channel_id),
+            )
+            await db.commit()
+
+    async def get_voice_stay(self, guild_id: int) -> int | None:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("SELECT channel_id FROM voice_stay WHERE guild_id=?", (guild_id,))
+            row = await cur.fetchone()
+        return int(row[0]) if row else None
+
+    async def clear_voice_stay(self, guild_id: int) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("DELETE FROM voice_stay WHERE guild_id=?", (guild_id,))
             await db.commit()
 
     async def record_voice(self, guild_id: int, user_id: int, started_at: dt.datetime,

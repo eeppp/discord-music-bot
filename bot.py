@@ -61,6 +61,7 @@ _commands_panel_published = False
 _voice_started: dict[tuple[int, int], dt.datetime] = {}
 _trivia_rounds: dict[int, dict[str, object]] = {}
 _weekly_report_dates: set[tuple[int, str]] = set()
+_voice_reconnect_tasks: dict[int, asyncio.Task[None]] = {}
 
 
 def _utcnow() -> dt.datetime:
@@ -214,6 +215,7 @@ async def _publish_update_announcement() -> None:
                     "📂 **قوائم خاصة:** إنشاء قوائم محفوظة وإضافة الأغاني وتشغيلها.\n"
                     "📊 **ملخص أسبوعي:** إحصاءات ساعات الصوت والأغاني الأكثر تشغيلًا.\n\n"
                     "🧭 **لوحة الأوامر:** تصميم مرتب بحسب الفئات مع أزرار للأوامر.\n\n"
+                    "🔊 **البقاء الصوتي 24/7:** `/join` يحفظ القناة ويعيد الاتصال بعد إعادة التشغيل أو الفصل، و`/leave` للمشرفين لإلغاء البقاء والمغادرة. أمر الإيقاف يمسح الأغاني ويبقي الاتصال عند تفعيل البقاء.\n\n"
                     "للتفاصيل استخدم `/hours` و`/playlist`، وتحدّث رصيدك عبر `/balance`."
                 ),
                 color=Config.EMBED_COLOR,
@@ -225,6 +227,42 @@ async def _publish_update_announcement() -> None:
             logger.info("Published update announcement %s in channel %s.", Config.VERSION, channel.id)
         except Exception:
             logger.exception("Could not publish update announcement for guild %s.", guild.id)
+
+
+async def _restore_voice_stay(guild: discord.Guild) -> None:
+    """Reconnect to the guild's persisted stay channel, retrying with backoff."""
+    try:
+        delay = 2
+        while True:
+            channel_id = await features.get_voice_stay(guild.id)
+            if channel_id is None:
+                return
+            channel = guild.get_channel(channel_id)
+            if not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+                try:
+                    channel = await guild.fetch_channel(channel_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    logger.warning("Saved voice stay channel %s is unavailable in guild %s.", channel_id, guild.id)
+                    return
+            if not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+                return
+            player = await load_player(guild.id, None)
+            try:
+                await player.connect(channel)
+                logger.info("Connected to saved voice stay channel %s in guild %s.", channel.id, guild.id)
+                return
+            except Exception:
+                logger.warning("Could not reconnect to voice stay channel in guild %s; retrying.", guild.id, exc_info=True)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60)
+    finally:
+        _voice_reconnect_tasks.pop(guild.id, None)
+
+
+def _schedule_voice_restore(guild: discord.Guild) -> None:
+    task = _voice_reconnect_tasks.get(guild.id)
+    if task is None or task.done():
+        _voice_reconnect_tasks[guild.id] = asyncio.create_task(_restore_voice_stay(guild))
 
 
 @bot.event
@@ -244,6 +282,9 @@ async def on_ready() -> None:
                     if not member.bot:
                         _voice_started.setdefault((guild.id, member.id), now)
         _database_ready = True
+
+    for guild in bot.guilds:
+        _schedule_voice_restore(guild)
 
     if not _commands_panel_published:
         bot.add_view(MusicCommandsView())
@@ -281,6 +322,11 @@ async def on_voice_state_update(
     before: discord.VoiceState,
     after: discord.VoiceState,
 ) -> None:
+    if bot.user and member.id == bot.user.id:
+        target_id = await features.get_voice_stay(member.guild.id)
+        if target_id is not None and (after.channel is None or after.channel.id != target_id):
+            _schedule_voice_restore(member.guild)
+        return
     if member.bot or before.channel == after.channel:
         return
     now = _utcnow()
@@ -361,6 +407,42 @@ async def play_command(ctx: commands.Context, *, query: str | None = None) -> No
     await play_query(ctx, query)
 
 
+@bot.hybrid_command(name="join", aliases=["انضمام", "دخول"])
+@commands.guild_only()
+async def join_command(ctx: commands.Context) -> None:
+    """Join the caller's voice channel and persist it as this guild's stay channel."""
+    voice_state = getattr(ctx.author, "voice", None)
+    channel = voice_state.channel if voice_state else None
+    if not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+        await _send_status(ctx, "🔊 ادخل قناة صوتية أولًا ثم استخدم `/join`.")
+        return
+    player = await load_player(ctx.guild.id, ctx.channel)
+    await features.set_voice_stay(ctx.guild.id, channel.id)
+    try:
+        await player.connect(channel)
+    except (discord.Forbidden, discord.HTTPException, asyncio.TimeoutError, OSError):
+        logger.exception("Could not join voice channel %s in guild %s.", channel.id, ctx.guild.id)
+        _schedule_voice_restore(ctx.guild)
+        await _send_status(ctx, "تعذّر الانضمام. تأكد من صلاحيات Connect وSpeak للقناة.")
+        return
+    await _send_status(ctx, f"✅ انضممت إلى **{channel.name}** وسأبقى فيها بعد انتهاء الأغاني.")
+
+
+@bot.hybrid_command(name="leave", aliases=["مغادرة", "خروج"])
+@commands.guild_only()
+@commands.has_guild_permissions(administrator=True)
+async def leave_command(ctx: commands.Context) -> None:
+    """Clear the persistent stay target and disconnect (administrators only)."""
+    guild_id = ctx.guild.id
+    await features.clear_voice_stay(guild_id)
+    task = _voice_reconnect_tasks.pop(guild_id, None)
+    if task and not task.done():
+        task.cancel()
+    player = player_manager.get(guild_id)
+    await player.stop(disconnect=True)
+    await _send_status(ctx, "👋 غادرت القناة الصوتية وأوقفت البقاء التلقائي.")
+
+
 @bot.hybrid_command(name="صوت", aliases=["ص", "volume", "vol"])
 @commands.guild_only()
 async def volume_command(ctx: commands.Context, volume: int | None = None) -> None:
@@ -435,8 +517,10 @@ async def stop_command(ctx: commands.Context) -> None:
     player = await _voice_player(ctx)
     if not player:
         return
-    await player.stop(disconnect=True)
-    await _send_status(ctx, "⏹️ توقف البوت ومسح قائمة الانتظار.")
+    staying = await features.get_voice_stay(ctx.guild.id) is not None
+    await player.stop(disconnect=not staying)
+    message = "⏹️ توقف التشغيل ومُسحت قائمة الانتظار؛ بقيت متصلًا حسب إعداد البقاء." if staying else "⏹️ توقف البوت ومسح قائمة الانتظار."
+    await _send_status(ctx, message)
 
 
 @bot.hybrid_command(name="وقف", aliases=["pause", "مؤقت"])
@@ -781,7 +865,11 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
     if isinstance(error, commands.CommandNotFound):
         return
     if isinstance(error, commands.MissingPermissions):
-        message = "تحتاج صلاحية إدارة الرسائل لاستخدام هذا الأمر."
+        message = (
+            "يقتصر أمر المغادرة على مشرفي الخادم."
+            if ctx.command and ctx.command.name == "leave"
+            else "تحتاج صلاحية إدارة الرسائل لاستخدام هذا الأمر."
+        )
         await _send_status(ctx, message)
         return
     if isinstance(error, commands.BotMissingPermissions):

@@ -31,4 +31,4 @@ class Config:
     WEEKLY_REPORT_CHANNEL_ID = os.getenv("WEEKLY_REPORT_CHANNEL_ID", "").strip()
     DJ_ROLE = os.getenv("DJ_ROLE", "DJ")
     DEFAULT_THEME = "Neon"
-    VERSION = "2.2.1"
+    VERSION = "2.2.2"
