@@ -29,7 +29,6 @@ class Config:
     VOICE_COINS_PER_MINUTE = _env_int("VOICE_COINS_PER_MINUTE", 1, 0, 1000)
     TRIVIA_REWARD = _env_int("TRIVIA_REWARD", 25, 0, 1000000)
     WEEKLY_REPORT_CHANNEL_ID = os.getenv("WEEKLY_REPORT_CHANNEL_ID", "").strip()
-    UPDATE_ANNOUNCEMENT_CHANNEL_ID = os.getenv("UPDATE_ANNOUNCEMENT_CHANNEL_ID", "").strip()
     DJ_ROLE = os.getenv("DJ_ROLE", "DJ")
     DEFAULT_THEME = "Neon"
-    VERSION = "2.2.0"
+    VERSION = "2.2.1"

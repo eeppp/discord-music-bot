@@ -183,10 +183,7 @@ async def _publish_update_announcement() -> None:
                 continue
 
             channel = None
-            configured_id = (
-                Config.UPDATE_ANNOUNCEMENT_CHANNEL_ID
-                or Config.MUSIC_COMMAND_CHANNEL_ID
-            )
+            configured_id = Config.MUSIC_COMMAND_CHANNEL_ID
             if configured_id:
                 try:
                     channel = guild.get_channel(int(configured_id))
@@ -201,7 +198,7 @@ async def _publish_update_announcement() -> None:
 
             if not isinstance(channel, discord.TextChannel):
                 logger.info(
-                    "No update announcement channel found for guild %s; set UPDATE_ANNOUNCEMENT_CHANNEL_ID.",
+                    "No music commands channel found for guild %s; set MUSIC_COMMAND_CHANNEL_ID.",
                     guild.id,
                 )
                 continue
@@ -216,6 +213,7 @@ async def _publish_update_announcement() -> None:
                     "🎵 **تحدي الأغنية:** مقطع عشوائي قصير، وأول إجابة صحيحة تربح عملات.\n"
                     "📂 **قوائم خاصة:** إنشاء قوائم محفوظة وإضافة الأغاني وتشغيلها.\n"
                     "📊 **ملخص أسبوعي:** إحصاءات ساعات الصوت والأغاني الأكثر تشغيلًا.\n\n"
+                    "🧭 **لوحة الأوامر:** تصميم مرتب بحسب الفئات مع أزرار للأوامر.\n\n"
                     "للتفاصيل استخدم `/hours` و`/playlist`، وتحدّث رصيدك عبر `/balance`."
                 ),
                 color=Config.EMBED_COLOR,
