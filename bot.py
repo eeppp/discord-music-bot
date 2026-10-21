@@ -155,7 +155,10 @@ async def _publish_music_commands_panel() -> None:
             async for message in channel.history(limit=50):
                 if (
                     message.author.id == bot.user.id
-                    and any(embed.title == "🎵 أوامر Music S3YD" for embed in message.embeds)
+                    and any(
+                        embed.title in {"🎵 أوامر Music S3YD", "🎶 لوحة Music S3YD"}
+                        for embed in message.embeds
+                    )
                 ):
                     await message.edit(embed=music_commands_embed(), view=MusicCommandsView())
                     logger.info("Updated music commands panel in channel %s.", channel.id)
@@ -169,13 +172,66 @@ async def _publish_music_commands_panel() -> None:
             logger.exception("Could not publish music commands panel in channel %s.", channel.id)
 
 
+async def _publish_update_announcement() -> None:
+    """Post this release's changelog once per guild after the new version starts."""
+    if bot.user is None:
+        return
+
+    for guild in bot.guilds:
+        try:
+            if await features.has_announced_version(guild.id, Config.VERSION):
+                continue
+
+            channel = None
+            configured_id = (
+                Config.UPDATE_ANNOUNCEMENT_CHANNEL_ID
+                or Config.MUSIC_COMMAND_CHANNEL_ID
+            )
+            if configured_id:
+                try:
+                    channel = guild.get_channel(int(configured_id))
+                except ValueError:
+                    logger.error("Announcement channel ID must be numeric.")
+                    continue
+            else:
+                channel = next(
+                    (item for item in guild.text_channels if is_music_commands_channel(item)),
+                    None,
+                )
+
+            if not isinstance(channel, discord.TextChannel):
+                logger.info(
+                    "No update announcement channel found for guild %s; set UPDATE_ANNOUNCEMENT_CHANNEL_ID.",
+                    guild.id,
+                )
+                continue
+
+            embed = discord.Embed(
+                title=f"🆕 تحديث Music S3YD · v{Config.VERSION}",
+                description=(
+                    "تم تحديث البوت وإضافة الميزات التالية:\n\n"
+                    "🎧 **ساعات الصوت:** تتبع مدة وجود الأعضاء في القنوات الصوتية.\n"
+                    "🪙 **اقتصاد التواجد:** رصيد تلقائي حسب الدقائق الصوتية مع أمر `/balance`.\n"
+                    "👋 **ترحيب صوتي:** نغمة قصيرة عند دخول عضو إلى قناة البوت إذا كان المشغّل صامتًا.\n"
+                    "🎵 **تحدي الأغنية:** مقطع عشوائي قصير، وأول إجابة صحيحة تربح عملات.\n"
+                    "📂 **قوائم خاصة:** إنشاء قوائم محفوظة وإضافة الأغاني وتشغيلها.\n"
+                    "📊 **ملخص أسبوعي:** إحصاءات ساعات الصوت والأغاني الأكثر تشغيلًا.\n\n"
+                    "للتفاصيل استخدم `/hours` و`/playlist`، وتحدّث رصيدك عبر `/balance`."
+                ),
+                color=Config.EMBED_COLOR,
+                timestamp=_utcnow(),
+            )
+            embed.set_footer(text="Music S3YD · سجل تحديثات البوت")
+            await channel.send(embed=embed)
+            await features.mark_version_announced(guild.id, Config.VERSION)
+            logger.info("Published update announcement %s in channel %s.", Config.VERSION, channel.id)
+        except Exception:
+            logger.exception("Could not publish update announcement for guild %s.", guild.id)
+
+
 @bot.event
 async def on_ready() -> None:
     global _database_ready, _commands_synced, _commands_panel_published
-    if not _commands_panel_published:
-        _commands_panel_published = True
-        bot.add_view(MusicCommandsView())
-        await _publish_music_commands_panel()
     if not _database_ready:
         await database.initialize()
         await features.initialize()
@@ -190,6 +246,12 @@ async def on_ready() -> None:
                     if not member.bot:
                         _voice_started.setdefault((guild.id, member.id), now)
         _database_ready = True
+
+    if not _commands_panel_published:
+        bot.add_view(MusicCommandsView())
+        await _publish_music_commands_panel()
+        await _publish_update_announcement()
+        _commands_panel_published = True
 
     if not weekly_reporter.is_running():
         weekly_reporter.start()

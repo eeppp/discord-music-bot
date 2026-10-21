@@ -36,6 +36,12 @@ class FeatureStore:
                     sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY(guild_id, week_key)
                 );
+                CREATE TABLE IF NOT EXISTS bot_announcements(
+                    guild_id INTEGER NOT NULL,
+                    version TEXT NOT NULL,
+                    sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(guild_id, version)
+                );
                 """
             )
             try:
@@ -118,6 +124,22 @@ class FeatureStore:
     async def mark_weekly_report(self, guild_id: int, week_key: str) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute("INSERT OR IGNORE INTO weekly_reports(guild_id,week_key) VALUES(?,?)", (guild_id, week_key))
+            await db.commit()
+
+    async def has_announced_version(self, guild_id: int, version: str) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                "SELECT 1 FROM bot_announcements WHERE guild_id=? AND version=?",
+                (guild_id, version),
+            )
+            return await cur.fetchone() is not None
+
+    async def mark_version_announced(self, guild_id: int, version: str) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO bot_announcements(guild_id,version) VALUES(?,?)",
+                (guild_id, version),
+            )
             await db.commit()
 
     async def random_song(self, guild_id: int) -> tuple[str, str] | None:

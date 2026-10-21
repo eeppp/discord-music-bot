@@ -50,7 +50,7 @@ class CommandCopyButton(discord.ui.Button):
     def __init__(self, command_name: str, usage: str, index: int) -> None:
         self.command = f"{Config.PREFIX}{command_name}{usage}"
         super().__init__(
-            label=f"📋 {Config.PREFIX}{command_name}",
+            label=f"{Config.PREFIX}{command_name}",
             style=discord.ButtonStyle.secondary,
             custom_id=f"music:copy_command:{index}",
             row=index // 5,
@@ -76,18 +76,45 @@ class MusicCommandsView(discord.ui.View):
 
 def music_commands_embed() -> discord.Embed:
     prefix = Config.PREFIX
-    command_lines = "\n".join(
-        f"• `{prefix}{command_name}{usage or (' <اسم الأغنية أو الرابط>' if command_name == 'شغل' else '')}` — {description}"
+    commands_by_name = {
+        command_name: (description, usage)
         for command_name, description, usage in MUSIC_COMMANDS
+    }
+    sections = (
+        ("🎵 تشغيل وتحكم", ("شغل", "تخطي", "قائمة", "وقف", "كمل", "تكرار", "خلط", "إيقاف")),
+        ("🔊 الصوت والتأثيرات", ("ص", "صوت", "باس", "تأثير", "تلقائي")),
+        ("👥 التواجد والعملات", ("hours", "balance", "trivia")),
+        ("📚 قوائم التشغيل", ("playlist",)),
+        ("🛠️ المساعدة", ("مساعدة",)),
     )
-    return discord.Embed(
-        title="🎵 أوامر Music S3YD",
+
+    embed = discord.Embed(
+        title="🎶 لوحة Music S3YD",
         description=(
-            "كل أمر في سطر مستقل. اضغط الزر الذي يحمل اسم الأمر ليرسل لك هذا الأمر وحده.\n\n"
-            f"{command_lines}"
+            "أوامر الموسيقى والتواجد في مكان واحد.\n"
+            "الأوامر تعمل بصيغة `/` أو بالبادئة `" + prefix + "`. اضغط زرًا لنسخ الأمر."
         ),
         color=Config.EMBED_COLOR,
     )
+    for title, command_names in sections:
+        lines = []
+        for command_name in command_names:
+            description, usage = commands_by_name[command_name]
+            example = usage or (" <اسم أو رابط>" if command_name == "شغل" else "")
+            lines.append(f"\u200f• {description} — `{prefix}{command_name}{example}`")
+        if title == "📚 قوائم التشغيل":
+            lines.extend(
+                (
+                    f"\u200f• إنشاء — `{prefix}playlist create <اسم>`",
+                    f"\u200f• إضافة — `{prefix}playlist add <القائمة> <أغنية>`",
+                    f"\u200f• تشغيل — `{prefix}playlist play <اسم>`",
+                    f"\u200f• عرض أو حذف — `{prefix}playlist list` / `{prefix}playlist delete <اسم>`",
+                )
+            )
+        embed.add_field(name=title, value="\n".join(lines), inline=False)
+
+    embed.set_footer(text="Music S3YD · يتم تحديث هذه اللوحة تلقائيًا مع كل إصدار")
+    return embed
 
 
 def _duration(seconds: int) -> str:
