@@ -306,6 +306,26 @@ class MusicPlayer:
         if not self.current and self.voice and not self.voice.is_playing() and not self.voice.is_paused():
             await self.advance()
 
+    async def play_clip(
+        self,
+        song: Song,
+        channel: discord.abc.GuildChannel,
+        start_at: float,
+    ) -> bool:
+        """Start a standalone, seeked clip when the player is otherwise idle."""
+        if self.current or len(self.queue) or (
+            self.voice and self.voice.is_connected()
+            and (self.voice.channel != channel or self.voice.is_playing() or self.voice.is_paused())
+        ):
+            return False
+        await self.connect(channel)
+        if self.current or len(self.queue) or self.voice.is_playing() or self.voice.is_paused():
+            return False
+        self._consecutive_failures = 0
+        self.current = song
+        await self._start_song(song, start_at=max(0.0, start_at))
+        return bool(self.current is song and self.voice.is_playing())
+
     async def _stream_url(self, song: Song) -> tuple[str, dict[str, str]]:
         def extract(
             url: str, use_fallback: bool = False

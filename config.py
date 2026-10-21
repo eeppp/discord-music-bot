@@ -26,6 +26,9 @@ class Config:
     LOG_FILE = os.getenv("LOG_FILE", "logs/music.log")
     AUTO_PLAY = os.getenv("AUTO_PLAY", "true").lower() in {"1", "true", "yes", "on"}
     YOUTUBE_COOKIES_B64 = os.getenv("YOUTUBE_COOKIES_B64", "").strip()
+    VOICE_COINS_PER_MINUTE = _env_int("VOICE_COINS_PER_MINUTE", 1, 0, 1000)
+    TRIVIA_REWARD = _env_int("TRIVIA_REWARD", 25, 0, 1000000)
+    WEEKLY_REPORT_CHANNEL_ID = os.getenv("WEEKLY_REPORT_CHANNEL_ID", "").strip()
     DJ_ROLE = os.getenv("DJ_ROLE", "DJ")
     DEFAULT_THEME = "Neon"
     VERSION = "2.1.0"
